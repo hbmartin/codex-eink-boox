@@ -6,6 +6,18 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val releaseSigningStoreFile = providers.environmentVariable("ANDROID_SIGNING_STORE_FILE").orNull
+val releaseSigningStorePassword = providers.environmentVariable("ANDROID_SIGNING_STORE_PASSWORD").orNull
+val releaseSigningKeyAlias = providers.environmentVariable("ANDROID_SIGNING_KEY_ALIAS").orNull
+val releaseSigningKeyPassword = providers.environmentVariable("ANDROID_SIGNING_KEY_PASSWORD").orNull
+val releaseSigningConfigured =
+    listOf(
+        releaseSigningStoreFile,
+        releaseSigningStorePassword,
+        releaseSigningKeyAlias,
+        releaseSigningKeyPassword,
+    ).all { !it.isNullOrBlank() }
+
 android {
     namespace = "me.haroldmartin.codexeink"
     compileSdk = 37
@@ -19,6 +31,17 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(checkNotNull(releaseSigningStoreFile))
+                storePassword = checkNotNull(releaseSigningStorePassword)
+                keyAlias = checkNotNull(releaseSigningKeyAlias)
+                keyPassword = checkNotNull(releaseSigningKeyPassword)
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".debug"
@@ -27,6 +50,9 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
