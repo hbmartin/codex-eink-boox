@@ -79,6 +79,16 @@ class JsonRpcCodec(
             throw JsonRpcCodecException("Malformed JSON-RPC frame", error)
         }
 
+        return try {
+            decodeObject(root)
+        } catch (error: JsonRpcCodecException) {
+            throw error
+        } catch (error: Exception) {
+            throw JsonRpcCodecException("Malformed JSON-RPC frame", error)
+        }
+    }
+
+    private fun decodeObject(root: JsonObject): JsonRpcMessage {
         root["jsonrpc"]?.let { version ->
             if (version.jsonPrimitive.contentOrNull != "2.0") {
                 throw JsonRpcCodecException("Unsupported JSON-RPC version")
@@ -97,6 +107,9 @@ class JsonRpcCodec(
         }
 
         if (idElement != null && (root.containsKey("result") || root.containsKey("error"))) {
+            if (root.containsKey("result") && root.containsKey("error")) {
+                throw JsonRpcCodecException("JSON-RPC response cannot contain both result and error")
+            }
             val error = root["error"]?.takeUnless { it is JsonNull }?.let(::decodeError)
             return JsonRpcResponse(
                 id = decodeId(idElement),

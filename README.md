@@ -84,7 +84,8 @@ code, redacted fixtures, hashes, and independently written protocol notes belong
 ## Modules
 
 - `app` — Android UI, encrypted settings, notifications, foreground service, and protocol adapter.
-- `protocol` — transport-neutral JSON-RPC, relay framing, state models, reducers, and WebSocket clients.
+- `protocol` — active direct JSON-RPC/WebSocket support plus experimental relay framing and test-only domain
+  reducer primitives; see [`protocol/README.md`](protocol/README.md) for the runtime boundary.
 - `eink-ui` — self-contained monochrome Compose design system derived from the GoL Screensaver project.
 - `research` — reproducible clean-room acquisition, verification, indexing, and compatibility notes.
 

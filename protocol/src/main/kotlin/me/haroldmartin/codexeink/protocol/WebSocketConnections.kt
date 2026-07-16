@@ -32,6 +32,29 @@ private object WebSocketTransportResources {
     private const val WEBSOCKET_PING_INTERVAL_SECONDS = 30L
 }
 
+@RequiresOptIn(
+    message = "Managed relay support is an experimental, compatibility-gated wire primitive; it is not an enrolled production connection path.",
+    level = RequiresOptIn.Level.ERROR,
+)
+annotation class ExperimentalManagedRelayApi
+
+internal data class FrameSendResult(
+    val acceptedFrames: Int,
+    val totalFrames: Int,
+) {
+    val complete: Boolean get() = acceptedFrames == totalFrames
+    val partial: Boolean get() = acceptedFrames in 1 until totalFrames
+}
+
+internal fun sendFrames(frames: List<String>, send: (String) -> Boolean): FrameSendResult {
+    var accepted = 0
+    for (frame in frames) {
+        if (!send(frame)) break
+        accepted++
+    }
+    return FrameSendResult(acceptedFrames = accepted, totalFrames = frames.size)
+}
+
 fun interface ConnectionHeadersProvider {
     /** Returns fresh headers for every connection attempt. Never persist or log the returned values. */
     suspend fun headers(): Map<String, String>
@@ -105,6 +128,7 @@ sealed interface RelayCompatibility {
 
 class RelayCompatibilityException(message: String) : IllegalStateException(message)
 
+@ExperimentalManagedRelayApi
 data class ManagedRelayConfig(
     /** No default is supplied: the authorized controller endpoint must come from verified research. */
     val endpoint: String,
@@ -137,6 +161,7 @@ data class ManagedRelayConfig(
  * controller enrollment/authentication flow. Therefore [connect] refuses to run until the caller
  * supplies [RelayCompatibility.Verified] and explicit endpoint/auth configuration.
  */
+@ExperimentalManagedRelayApi
 class ManagedRelayConnection internal constructor(
     private val config: ManagedRelayConfig,
     client: OkHttpClient,
@@ -229,7 +254,11 @@ class ManagedRelayConnection internal constructor(
             protocolError("Managed relay replay buffer is full")
             return false
         }
-        return sendRawFrames(frames.map(relayCodec::encode))
+        if (!sendRawFrames(frames.map(relayCodec::encode))) {
+            protocolError("Managed relay send was interrupted; unacknowledged frames remain queued for replay")
+        }
+        // Recording in the bounded replay buffer is the managed transport's acceptance boundary.
+        return true
     }
 
     override fun onSocketText(text: String) {
@@ -372,21 +401,25 @@ abstract class OkHttpCodexConnection internal constructor(
             return@withLock
         }
         validateEndpoint()
-        manuallyDisconnected = false
-        reconnectJob?.cancel()
+        val scheduled = synchronized(monitor) {
+            manuallyDisconnected = false
+            reconnectJob.also { reconnectJob = null }
+        }
+        scheduled?.cancel()
         mutableState.value = ConnectionState.Connecting()
         openOnce(awaitOpen = true)
     }
 
     override suspend fun disconnect(code: Int, reason: String) = lifecycleMutex.withLock {
-        manuallyDisconnected = true
         mutableState.value = ConnectionState.Closing
-        reconnectJob?.cancel()
-        reconnectJob = null
-        val existing = synchronized(monitor) {
+        val (existing, scheduled) = synchronized(monitor) {
+            manuallyDisconnected = true
             generation++
-            socket.also { socket = null }
+            val active = socket.also { socket = null }
+            val pendingReconnect = reconnectJob.also { reconnectJob = null }
+            active to pendingReconnect
         }
+        scheduled?.cancel()
         existing?.close(code, reason.take(123))
         onSocketLost()
         failPendingRequests(IOException("Connection closed by client"))
@@ -396,14 +429,23 @@ abstract class OkHttpCodexConnection internal constructor(
     protected fun sendRawFrames(frames: List<String>): Boolean {
         if (frames.isEmpty()) return true
         val active = synchronized(monitor) { socket }
-        if (active == null || state.value !is ConnectionState.Connected) return false
-        return frames.all(active::send)
+        if (active == null || state.value !is ConnectionState.Connected) {
+            return false
+        }
+        val result = sendFrames(frames, active::send)
+        if (!result.complete) active.cancel()
+        return result.complete
     }
 
     protected open fun onSocketOpened(generation: Long) = Unit
     protected open fun onSocketLost() = Unit
     protected open val preservesPendingRequestsAcrossReconnect: Boolean = false
     protected abstract fun onSocketText(text: String)
+
+    override fun onEventQueueOverflow() {
+        super.onEventQueueOverflow()
+        synchronized(monitor) { socket }?.cancel()
+    }
 
     private suspend fun openOnce(awaitOpen: Boolean) {
         val headers = try {
@@ -510,36 +552,50 @@ abstract class OkHttpCodexConnection internal constructor(
     }
 
     private fun scheduleReconnect(cause: Throwable) {
-        if (manuallyDisconnected) {
-            mutableState.value = ConnectionState.Disconnected
-            return
-        }
-        val delayMillis = backoff?.nextDelayMillis()
-        if (delayMillis == null) {
-            failPendingRequests(IOException("Reconnect attempts exhausted", cause))
-            mutableState.value = ConnectionState.Failed(
+        var previousJob: Job? = null
+        synchronized(monitor) {
+            if (manuallyDisconnected) {
+                mutableState.value = ConnectionState.Disconnected
+                return
+            }
+            val delayMillis = backoff?.nextDelayMillis()
+            if (delayMillis == null) {
+                failPendingRequests(IOException("Reconnect attempts exhausted", cause))
+                mutableState.value = ConnectionState.Failed(
+                    reason = ProtocolRedactor.redact(cause.message ?: cause::class.java.simpleName),
+                    recoverable = false,
+                )
+                return
+            }
+            val attempt = backoff.attempt
+            mutableState.value = ConnectionState.Reconnecting(
+                attempt = attempt,
+                delayMillis = delayMillis,
                 reason = ProtocolRedactor.redact(cause.message ?: cause::class.java.simpleName),
-                recoverable = false,
             )
-            return
-        }
-        val attempt = backoff.attempt
-        mutableState.value = ConnectionState.Reconnecting(
-            attempt = attempt,
-            delayMillis = delayMillis,
-            reason = ProtocolRedactor.redact(cause.message ?: cause::class.java.simpleName),
-        )
-        reconnectJob?.cancel()
-        reconnectJob = scope.launch {
-            delay(delayMillis)
-            if (manuallyDisconnected) return@launch
-            mutableState.value = ConnectionState.Connecting(attempt = attempt)
-            try {
-                openOnce(awaitOpen = true)
-            } catch (_: Throwable) {
-                // The listener/preparation failure schedules the next bounded attempt.
+            previousJob = reconnectJob
+            reconnectJob = scope.launch {
+                delay(delayMillis)
+                lifecycleMutex.withLock {
+                    val shouldReconnect = synchronized(monitor) {
+                        if (manuallyDisconnected) {
+                            false
+                        } else {
+                            reconnectJob = null
+                            true
+                        }
+                    }
+                    if (!shouldReconnect) return@withLock
+                    mutableState.value = ConnectionState.Connecting(attempt = attempt)
+                    try {
+                        openOnce(awaitOpen = true)
+                    } catch (_: Throwable) {
+                        // The listener/preparation failure schedules the next bounded attempt.
+                    }
+                }
             }
         }
+        previousJob?.cancel()
     }
 
     private fun validateEndpoint() {

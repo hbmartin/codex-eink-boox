@@ -3,7 +3,12 @@ package me.haroldmartin.codexeink.pairing
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
 class PairingCodeParserTest {
     @Test
     fun `raw code is trimmed and normalized`() {
@@ -33,6 +38,10 @@ class PairingCodeParserTest {
         assertEquals(
             "CAMEL777",
             PairingCodeParser.parse("codex-eink://pair?pairingCode=camel777"),
+        )
+        assertEquals(
+            "CODE WITH SPACE",
+            PairingCodeParser.parse("codex-eink://pair?code=code with space"),
         )
     }
 

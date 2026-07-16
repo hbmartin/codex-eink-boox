@@ -4,11 +4,11 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonElement
@@ -34,7 +34,8 @@ sealed interface ConnectionEvent {
 
 interface CodexConnection {
     val state: StateFlow<ConnectionState>
-    val events: SharedFlow<ConnectionEvent>
+    /** Ordered, single-consumer event stream with bounded buffering. */
+    val events: Flow<ConnectionEvent>
 
     suspend fun connect()
     suspend fun disconnect(code: Int = 1000, reason: String = "client disconnect")
@@ -58,13 +59,10 @@ interface CodexConnection {
 
 abstract class BaseCodexConnection : CodexConnection {
     protected val mutableState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
-    protected val mutableEvents = MutableSharedFlow<ConnectionEvent>(
-        replay = 0,
-        extraBufferCapacity = 64,
-    )
+    private val eventQueue = Channel<ConnectionEvent>(capacity = EVENT_QUEUE_CAPACITY)
 
     override val state: StateFlow<ConnectionState> = mutableState.asStateFlow()
-    override val events: SharedFlow<ConnectionEvent> = mutableEvents.asSharedFlow()
+    override val events: Flow<ConnectionEvent> = eventQueue.receiveAsFlow()
 
     private val nextRequestId = AtomicLong(1)
     private val pendingRequests = ConcurrentHashMap<JsonRpcId, CompletableDeferred<JsonRpcResponse>>()
@@ -90,19 +88,35 @@ abstract class BaseCodexConnection : CodexConnection {
 
     protected fun receive(message: JsonRpcMessage) {
         if (message is JsonRpcResponse && pendingRequests.remove(message.id)?.complete(message) == true) return
-        mutableEvents.tryEmit(ConnectionEvent.MessageReceived(message))
+        publishEvent(ConnectionEvent.MessageReceived(message))
     }
 
     protected fun protocolError(summary: String) {
-        mutableEvents.tryEmit(ConnectionEvent.ProtocolError(summary))
+        publishEvent(ConnectionEvent.ProtocolError(summary))
     }
 
     protected fun transportClosed(code: Int, reason: String) {
-        mutableEvents.tryEmit(ConnectionEvent.TransportClosed(code, reason))
+        publishEvent(ConnectionEvent.TransportClosed(code, reason))
+    }
+
+    /** Called synchronously when bounded event delivery cannot accept another event. */
+    protected open fun onEventQueueOverflow() {
+        mutableState.value = ConnectionState.Failed(
+            reason = "Inbound event queue overflow",
+            recoverable = true,
+        )
     }
 
     protected fun failPendingRequests(cause: Throwable) {
         pendingRequests.values.forEach { it.completeExceptionally(cause) }
         pendingRequests.clear()
+    }
+
+    private fun publishEvent(event: ConnectionEvent) {
+        if (eventQueue.trySend(event).isFailure) onEventQueueOverflow()
+    }
+
+    private companion object {
+        const val EVENT_QUEUE_CAPACITY = 64
     }
 }

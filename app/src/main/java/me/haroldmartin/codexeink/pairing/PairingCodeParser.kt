@@ -10,7 +10,7 @@ object PairingCodeParser {
         if (value.isEmpty()) return null
 
         val uri = runCatching { Uri.parse(value) }.getOrNull()
-        if (uri?.scheme != null) {
+        if (uri?.scheme != null && uri.isHierarchical) {
             codeKeys.firstNotNullOfOrNull { key -> uri.getQueryParameter(key) }
                 ?.takeIf(::looksLikeCode)
                 ?.let { return normalize(it) }

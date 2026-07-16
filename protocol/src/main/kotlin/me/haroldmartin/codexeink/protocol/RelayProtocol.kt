@@ -285,17 +285,29 @@ sealed interface ChunkAssemblyResult {
 /** Bounded, replay-safe chunk assembler. Chunks may arrive out of order and exact duplicates are ignored. */
 class ChunkAssembler(
     private val maxSegmentCount: Int = 1_024,
-    private val maxMessageBytes: Int = 100 * 1024 * 1024,
-    private val maxConcurrentAssemblies: Int = 128,
+    private val maxSegmentBytes: Int = 150 * 1024,
+    private val maxMessageBytes: Int = 8 * 1024 * 1024,
+    private val maxConcurrentAssemblies: Int = 32,
+    private val maxBufferedBytes: Int = 16 * 1024 * 1024,
 ) {
     private data class Key(val clientId: String, val streamId: String, val seqId: Long)
     private data class Assembly(
         val segmentCount: Int,
         val messageSizeBytes: Int,
         val segments: MutableMap<Int, ByteArray> = mutableMapOf(),
+        var bufferedBytes: Int = 0,
     )
 
     private val assemblies = ConcurrentHashMap<Key, Assembly>()
+    private var totalBufferedBytes = 0
+
+    init {
+        require(maxSegmentCount > 0)
+        require(maxSegmentBytes > 0)
+        require(maxMessageBytes > 0)
+        require(maxConcurrentAssemblies > 0)
+        require(maxBufferedBytes > 0)
+    }
 
     @Synchronized
     fun offer(chunk: RelayFrame.MessageChunk): ChunkAssemblyResult {
@@ -310,12 +322,16 @@ class ChunkAssembler(
         if (chunk.messageSizeBytes !in 1..maxMessageBytes) {
             return ChunkAssemblyResult.Rejected("invalid message_size_bytes")
         }
+        val maxEncodedSegmentChars = ((maxSegmentBytes.toLong() + 2L) / 3L) * 4L
+        if (chunk.messageChunkBase64.length.toLong() > maxEncodedSegmentChars) {
+            return ChunkAssemblyResult.Rejected("encoded chunk exceeds segment limit")
+        }
         val decoded = try {
             Base64.getDecoder().decode(chunk.messageChunkBase64)
         } catch (_: IllegalArgumentException) {
             return ChunkAssemblyResult.Rejected("invalid base64")
         }
-        if (decoded.isEmpty() || decoded.size > chunk.messageSizeBytes) {
+        if (decoded.isEmpty() || decoded.size > maxSegmentBytes || decoded.size > chunk.messageSizeBytes) {
             return ChunkAssemblyResult.Rejected("invalid decoded chunk size")
         }
 
@@ -329,7 +345,7 @@ class ChunkAssembler(
             assemblies[key] = assembly
         }
         if (assembly.segmentCount != chunk.segmentCount || assembly.messageSizeBytes != chunk.messageSizeBytes) {
-            assemblies.remove(key)
+            removeAssembly(key)
             return ChunkAssemblyResult.Rejected("chunk metadata changed")
         }
 
@@ -338,33 +354,53 @@ class ChunkAssembler(
             return if (existing.contentEquals(decoded)) {
                 ChunkAssemblyResult.Duplicate
             } else {
-                assemblies.remove(key)
+                removeAssembly(key)
                 ChunkAssemblyResult.Rejected("duplicate segment content changed")
             }
         }
+        if (assembly.bufferedBytes + decoded.size > assembly.messageSizeBytes) {
+            removeAssembly(key)
+            return ChunkAssemblyResult.Rejected("buffered chunks exceed declared message size")
+        }
+        if (totalBufferedBytes + decoded.size > maxBufferedBytes) {
+            removeAssembly(key)
+            return ChunkAssemblyResult.Rejected("global chunk buffer limit exceeded")
+        }
         assembly.segments[chunk.segmentId] = decoded
+        assembly.bufferedBytes += decoded.size
+        totalBufferedBytes += decoded.size
         if (assembly.segments.size < assembly.segmentCount) return ChunkAssemblyResult.Pending
 
-        val totalSize = assembly.segments.values.sumOf(ByteArray::size)
+        val totalSize = assembly.bufferedBytes
         if (totalSize != assembly.messageSizeBytes) {
-            assemblies.remove(key)
+            removeAssembly(key)
             return ChunkAssemblyResult.Rejected("reassembled size mismatch")
         }
         val bytes = ByteArray(totalSize)
         var offset = 0
         repeat(assembly.segmentCount) { index ->
             val segment = assembly.segments[index]
-                ?: return ChunkAssemblyResult.Rejected("missing segment")
+                ?: run {
+                    removeAssembly(key)
+                    return ChunkAssemblyResult.Rejected("missing segment")
+                }
             segment.copyInto(bytes, destinationOffset = offset)
             offset += segment.size
         }
-        assemblies.remove(key)
+        removeAssembly(key)
         return ChunkAssemblyResult.Complete(String(bytes, StandardCharsets.UTF_8))
     }
 
+    @Synchronized
     fun invalidate(clientId: String, streamId: String? = null) {
-        assemblies.keys.removeIf { key ->
-            key.clientId == clientId && (streamId == null || key.streamId == streamId)
+        assemblies.keys
+            .filter { key -> key.clientId == clientId && (streamId == null || key.streamId == streamId) }
+            .forEach(::removeAssembly)
+    }
+
+    private fun removeAssembly(key: Key) {
+        assemblies.remove(key)?.let { removed ->
+            totalBufferedBytes -= removed.bufferedBytes
         }
     }
 

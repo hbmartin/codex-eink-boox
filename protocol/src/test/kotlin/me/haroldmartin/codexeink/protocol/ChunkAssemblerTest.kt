@@ -79,6 +79,72 @@ class ChunkAssemblerTest {
     }
 
     @Test
+    fun `rejects an incomplete assembly as soon as buffered bytes exceed declared size`() {
+        val first = RelayFrame.MessageChunk(
+            clientId = "c",
+            streamId = "s",
+            seqId = 1,
+            direction = RelayDirection.SERVER_TO_CLIENT,
+            segmentId = 0,
+            segmentCount = 3,
+            messageSizeBytes = 3,
+            messageChunkBase64 = Base64.getEncoder().encodeToString("ab".toByteArray()),
+        )
+        val second = first.copy(
+            segmentId = 1,
+            messageChunkBase64 = Base64.getEncoder().encodeToString("cd".toByteArray()),
+        )
+        val assembler = ChunkAssembler()
+
+        assertEquals(ChunkAssemblyResult.Pending, assembler.offer(first))
+        assertTrue(assembler.offer(second) is ChunkAssemblyResult.Rejected)
+    }
+
+    @Test
+    fun `rejects an encoded segment before allocating an oversized decoded array`() {
+        val chunk = RelayFrame.MessageChunk(
+            clientId = "c",
+            streamId = "s",
+            seqId = 1,
+            direction = RelayDirection.SERVER_TO_CLIENT,
+            segmentId = 0,
+            segmentCount = 1,
+            messageSizeBytes = 8,
+            messageChunkBase64 = Base64.getEncoder().encodeToString("12345678".toByteArray()),
+        )
+
+        val result = ChunkAssembler(maxSegmentBytes = 4).offer(chunk)
+
+        assertEquals(
+            ChunkAssemblyResult.Rejected("encoded chunk exceeds segment limit"),
+            result,
+        )
+    }
+
+    @Test
+    fun `bounds bytes buffered across incomplete messages`() {
+        fun chunk(sequence: Long, text: String) = RelayFrame.MessageChunk(
+            clientId = "c",
+            streamId = "s",
+            seqId = sequence,
+            direction = RelayDirection.SERVER_TO_CLIENT,
+            segmentId = 0,
+            segmentCount = 2,
+            messageSizeBytes = 4,
+            messageChunkBase64 = Base64.getEncoder().encodeToString(text.toByteArray()),
+        )
+        val assembler = ChunkAssembler(maxBufferedBytes = 3)
+
+        assertEquals(ChunkAssemblyResult.Pending, assembler.offer(chunk(1, "ab")))
+        assertEquals(
+            ChunkAssemblyResult.Rejected("global chunk buffer limit exceeded"),
+            assembler.offer(chunk(2, "cd")),
+        )
+        assembler.invalidate("c", "s")
+        assertEquals(ChunkAssemblyResult.Pending, assembler.offer(chunk(3, "ef")))
+    }
+
+    @Test
     fun `invalidates partial stream state`() {
         val chunk = RelayFrame.MessageChunk(
             clientId = "c",

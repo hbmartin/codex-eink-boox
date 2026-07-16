@@ -24,6 +24,13 @@ Direct diagnostic mode speaks to the `codex app-server` process that you start f
 protocol and UI development, but it is not the same topology as Codex Remote and does not take over a task
 owned by another Codex Desktop process.
 
+The codebase contains managed-relay envelopes, chunking, replay, and a domain reducer so interoperability
+can be developed and tested without mixing relay DTOs into Compose. Those components are explicitly
+experimental: the app factory does not construct a managed connection, and their unit tests cover wire and
+state behavior only. They do not demonstrate controller enrollment, authentication, relay reachability, or
+end-to-end task control. See the [`protocol` boundary notes](../protocol/README.md) before interpreting test
+coverage or adding another setup path.
+
 ## Prerequisites
 
 ### Build workstation

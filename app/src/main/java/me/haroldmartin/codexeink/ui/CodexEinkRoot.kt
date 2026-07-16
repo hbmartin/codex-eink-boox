@@ -13,7 +13,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -43,6 +42,7 @@ import me.haroldmartin.einkui.EinkButtonEmphasis
 import me.haroldmartin.einkui.EinkApprovalPanelShell
 import me.haroldmartin.einkui.EinkCheckboxRow
 import me.haroldmartin.einkui.EinkConnectionBanner
+import me.haroldmartin.einkui.EinkConfirmDialog
 import me.haroldmartin.einkui.EinkDiffBlock
 import me.haroldmartin.einkui.EinkDiffLine
 import me.haroldmartin.einkui.EinkDiffLineKind
@@ -119,7 +119,7 @@ private fun SetupScreen(
     onAlwaysConnectedChange: (Boolean) -> Unit,
     onCancel: (() -> Unit)?,
 ) {
-    var managedMode by remember { mutableStateOf(true) }
+    var managedMode by remember { mutableStateOf(false) }
     var pairingCode by remember { mutableStateOf("") }
     var displayName by remember { mutableStateOf("My Codex host") }
     var endpoint by remember { mutableStateOf("") }
@@ -134,7 +134,7 @@ private fun SetupScreen(
     ) {
         Text("Codex Eink", style = EinkTheme.typography.title)
         Text(
-            "Pair with Codex Remote, or use the authenticated direct transport for diagnostics.",
+            "Use the authenticated direct transport for diagnostics. Managed Remote remains compatibility-gated.",
             style = EinkTheme.typography.body,
         )
         ConnectionBanner(state.connectivity, state.connectionMessage)
@@ -305,7 +305,7 @@ private fun Header(
         state.error?.let { Text(it, style = EinkTheme.typography.supporting) }
     }
     if (confirmForget) {
-        AlertDialog(
+        EinkConfirmDialog(
             onDismissRequest = { confirmForget = false },
             title = { Text("Forget this host?") },
             text = { Text("The encrypted endpoint and capability token will be removed from this device.") },
@@ -491,7 +491,7 @@ private fun ApprovalPanel(approval: ApprovalUi, onDecision: (String, String) -> 
         },
     )
     confirmDecision?.let { decision ->
-        AlertDialog(
+        EinkConfirmDialog(
             onDismissRequest = { confirmDecision = null },
             title = { Text("Confirm persistent approval") },
             text = { Text("This decision can grant access beyond this single action: ${decisionLabel(decision)}") },
@@ -597,16 +597,38 @@ private fun timelineMarker(kind: TimelineKind): String = when (kind) {
     TimelineKind.FileChange -> "DIFF"
 }
 
-private fun parseDiffLines(diff: String): List<EinkDiffLine> {
+internal fun parseDiffLines(diff: String): List<EinkDiffLine> {
     if (diff.isBlank()) return listOf(EinkDiffLine("No diff content was supplied."))
-    return diff.lineSequence().map { line ->
-        when {
-            line.startsWith("@@") || line.startsWith("diff ") ||
-                line.startsWith("---") || line.startsWith("+++") ->
-                EinkDiffLine(line, EinkDiffLineKind.Header)
-            line.startsWith("+") -> EinkDiffLine(line.drop(1), EinkDiffLineKind.Added)
-            line.startsWith("-") -> EinkDiffLine(line.drop(1), EinkDiffLineKind.Removed)
-            else -> EinkDiffLine(line.removePrefix(" "), EinkDiffLineKind.Context)
-        }
-    }.toList()
+    val lines = diff.lineSequence().iterator()
+    val rendered = ArrayList<EinkDiffLine>(MAX_RENDERED_DIFF_LINES + 1)
+    repeat(MAX_RENDERED_DIFF_LINES) {
+        if (!lines.hasNext()) return rendered
+        rendered += parseDiffLine(lines.next())
+    }
+    if (lines.hasNext()) {
+        rendered += EinkDiffLine(
+            "Additional diff lines are not rendered on this device.",
+            EinkDiffLineKind.Header,
+        )
+    }
+    return rendered
 }
+
+private fun parseDiffLine(rawLine: String): EinkDiffLine {
+    val line = if (rawLine.length <= MAX_RENDERED_DIFF_LINE_CHARS) {
+        rawLine
+    } else {
+        rawLine.take(MAX_RENDERED_DIFF_LINE_CHARS) + "…"
+    }
+    return when {
+        line.startsWith("@@") || line.startsWith("diff ") ||
+            line.startsWith("---") || line.startsWith("+++") ->
+            EinkDiffLine(line, EinkDiffLineKind.Header)
+        line.startsWith("+") -> EinkDiffLine(line.drop(1), EinkDiffLineKind.Added)
+        line.startsWith("-") -> EinkDiffLine(line.drop(1), EinkDiffLineKind.Removed)
+        else -> EinkDiffLine(line.removePrefix(" "), EinkDiffLineKind.Context)
+    }
+}
+
+private const val MAX_RENDERED_DIFF_LINES = 400
+private const val MAX_RENDERED_DIFF_LINE_CHARS = 4_000

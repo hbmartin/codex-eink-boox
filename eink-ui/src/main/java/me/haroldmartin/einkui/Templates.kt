@@ -1,5 +1,6 @@
 package me.haroldmartin.einkui
 
+import android.view.WindowManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,12 +17,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogWindowProvider
 import androidx.compose.ui.window.DialogProperties
 
 enum class EinkLayoutMode {
@@ -163,6 +167,7 @@ fun EinkPickerDialog(
         onDismissRequest = onDismissRequest,
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
+        ConfigureEinkDialogWindow()
         Box(
             modifier = modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
@@ -202,6 +207,62 @@ fun EinkPickerDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+/** Static, high-contrast confirmation dialog without dimming, elevation, or window animation. */
+@Composable
+fun EinkConfirmDialog(
+    onDismissRequest: () -> Unit,
+    title: @Composable () -> Unit,
+    text: @Composable () -> Unit,
+    confirmButton: @Composable RowScope.() -> Unit,
+    dismissButton: @Composable RowScope.() -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        ConfigureEinkDialogWindow()
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            EinkSurface(
+                modifier = modifier
+                    .fillMaxWidth(EinkTheme.layout.dialogWidthFraction)
+                    .widthIn(max = EinkTheme.layout.dialogMaxWidth),
+                borderWidth = EinkTheme.borders.strong,
+            ) {
+                Column(
+                    modifier = Modifier.padding(EinkTheme.spacing.medium),
+                    verticalArrangement = Arrangement.spacedBy(EinkTheme.spacing.medium),
+                ) {
+                    title()
+                    text()
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(
+                            space = EinkTheme.spacing.small,
+                            alignment = Alignment.End,
+                        ),
+                    ) {
+                        dismissButton()
+                        confirmButton()
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConfigureEinkDialogWindow() {
+    val parent = LocalView.current.parent
+    SideEffect {
+        (parent as? DialogWindowProvider)?.window?.apply {
+            clearFlags(WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            setDimAmount(0f)
+            setWindowAnimations(0)
         }
     }
 }

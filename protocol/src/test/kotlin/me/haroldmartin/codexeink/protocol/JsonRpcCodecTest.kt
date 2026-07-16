@@ -99,6 +99,15 @@ class JsonRpcCodecTest {
     }
 
     @Test
+    fun `rejects response containing both result and error as a codec failure`() {
+        assertThrows(JsonRpcCodecException::class.java) {
+            codec.decode(
+                """{"id":1,"result":{"ok":true},"error":{"code":-32603,"message":"broken"}}""",
+            )
+        }
+    }
+
+    @Test
     fun `standard codec can include version`() {
         val encoded = JsonRpcCodec(includeVersion = true).encode(
             JsonRpcNotification(method = "initialized"),

@@ -8,3 +8,5 @@
 - E-ink UI must remain meaningful in black and white and use no authored animation, ripple, elevation, or shadow.
 - Run `./scripts/verify.sh` before handing off changes.
 - Managed Remote claims require an end-to-end test against a user-owned host and a legitimate independent auth flow.
+- Managed relay primitives and `CodexStateReducer` are experimental/test-only boundaries; unit coverage does not
+  prove that Managed Remote is available in the running Android controller.

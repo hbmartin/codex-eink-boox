@@ -39,7 +39,13 @@ sealed interface CodexEvent {
     ) : CodexEvent
 }
 
-object CodexStateReducer {
+/**
+ * Experimental domain reducer used by protocol model tests.
+ *
+ * The running Android controller maps active direct app-server traffic through its own adapter; this
+ * reducer must not be treated as evidence that managed relay traffic is integrated end to end.
+ */
+internal object CodexStateReducer {
     fun reduce(state: CodexState, event: CodexEvent): CodexState = when (event) {
         is CodexEvent.ConnectionChanged -> state.copy(connectionState = event.state)
         is CodexEvent.EnvironmentUpserted -> state.copy(
