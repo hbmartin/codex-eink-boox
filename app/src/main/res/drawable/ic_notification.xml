@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Alpha-only small-notification glyph: a squared C for Codex. -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M4,3h16v4h-12v10h12v4h-16z" />
+</vector>

@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Codex Eink</string>
+    <string name="connection_channel_name">Codex connection</string>
+    <string name="connection_channel_description">Keeps Codex tasks connected while Codex Eink is in the background.</string>
+    <string name="attention_channel_name">Codex needs attention</string>
+    <string name="attention_channel_description">Approvals, questions, completed tasks, and connection failures.</string>
+    <string name="connection_notification_title">Codex Eink is connected</string>
+    <string name="connection_notification_reconnecting">Codex Eink is reconnecting</string>
+    <string name="connection_notification_attention">Codex Eink needs attention</string>
+</resources>
