@@ -407,6 +407,7 @@ abstract class OkHttpCodexConnection internal constructor(
     private var socket: WebSocket? = null
     private var reconnectJob: Job? = null
     private var stabilityJob: Job? = null
+    private var activeOpenedDeferred: CompletableDeferred<Unit>? = null
 
     override suspend fun connect() {
         val shouldConnect = lifecycleMutex.withLock {
@@ -428,13 +429,15 @@ abstract class OkHttpCodexConnection internal constructor(
 
     override suspend fun disconnect(code: Int, reason: String) = lifecycleMutex.withLock {
         mutableState.value = ConnectionState.Closing
-        val (existing, scheduled) = synchronized(monitor) {
+        val (existing, scheduled, activeAttempt) = synchronized(monitor) {
             manuallyDisconnected = true
             generation++
             val active = socket.also { socket = null }
             val pendingReconnect = reconnectJob.also { reconnectJob = null }
-            active to pendingReconnect
+            val pendingOpen = activeOpenedDeferred.also { activeOpenedDeferred = null }
+            Triple(active, pendingReconnect, pendingOpen)
         }
+        activeAttempt?.completeExceptionally(CancellationException("Connection cancelled by disconnect"))
         scheduled?.cancel()
         stabilityJob?.cancel()
         stabilityJob = null
@@ -493,6 +496,7 @@ abstract class OkHttpCodexConnection internal constructor(
             if (manuallyDisconnected) throw CancellationException("Connection attempt was cancelled")
             generation += 1
             lostGeneration = Long.MIN_VALUE
+            activeOpenedDeferred = opened
             generation
         }
         val listener = object : WebSocketListener() {
@@ -543,13 +547,21 @@ abstract class OkHttpCodexConnection internal constructor(
                 handleLoss(currentGeneration, t, opened)
             }
         }
-        val createdSocket = client.newWebSocket(requestBuilder.build(), listener)
+        val createdSocket = try {
+            client.newWebSocket(requestBuilder.build(), listener)
+        } catch (error: Throwable) {
+            clearActiveOpenedDeferred(opened)
+            throw error
+        }
         synchronized(monitor) {
             if (currentGeneration == generation && lostGeneration != currentGeneration && socket == null) {
                 socket = createdSocket
             }
         }
-        if (!awaitOpen) return
+        if (!awaitOpen) {
+            clearActiveOpenedDeferred(opened)
+            return
+        }
         try {
             withTimeout(connectTimeoutMillis) { opened.await() }
         } catch (error: TimeoutCancellationException) {
@@ -564,6 +576,14 @@ abstract class OkHttpCodexConnection internal constructor(
             createdSocket.cancel()
             handleLoss(currentGeneration, error, opened)
             throw error
+        } finally {
+            clearActiveOpenedDeferred(opened)
+        }
+    }
+
+    private fun clearActiveOpenedDeferred(opened: CompletableDeferred<Unit>) {
+        synchronized(monitor) {
+            if (activeOpenedDeferred === opened) activeOpenedDeferred = null
         }
     }
 
