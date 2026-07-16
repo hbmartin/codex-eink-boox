@@ -37,6 +37,9 @@ fun EinkTextField(
     keyboardActions: KeyboardActions = KeyboardActions.Default,
     visualTransformation: VisualTransformation = VisualTransformation.None,
 ) {
+    require(!isError || !supportingText.isNullOrBlank()) {
+        "supportingText must describe the error when isError is true"
+    }
     var isFocused by remember { mutableStateOf(false) }
     val colors = EinkTheme.colors
     val borderColor = when {
@@ -46,8 +49,8 @@ fun EinkTextField(
     }
     val borderWidth = if (isFocused || isError) EinkTheme.borders.strong else EinkTheme.borders.standard
     val contentColor = if (enabled) colors.content else colors.disabled
-    val semanticsModifier = if (isError && supportingText != null) {
-        Modifier.semantics { error(supportingText) }
+    val semanticsModifier = if (isError) {
+        Modifier.semantics { error(requireNotNull(supportingText)) }
     } else {
         Modifier
     }

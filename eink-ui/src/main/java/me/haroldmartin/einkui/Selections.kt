@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.toggleableState
@@ -37,21 +38,23 @@ fun EinkCheckbox(
 ) {
     val color = if (enabled) EinkTheme.colors.content else EinkTheme.colors.disabled
     val checkStrokeWidth = EinkTheme.borders.strong
+    val stateModifier = modifier
+        .sizeIn(
+            minWidth = EinkTheme.layout.minimumTouchTarget,
+            minHeight = EinkTheme.layout.minimumTouchTarget,
+        )
+        .semantics {
+            role = Role.Checkbox
+            toggleableState = ToggleableState(checked)
+            if (!enabled) disabled()
+        }
     val resolvedModifier = if (onCheckedChange != null) {
-        modifier
-            .sizeIn(
-                minWidth = EinkTheme.layout.minimumTouchTarget,
-                minHeight = EinkTheme.layout.minimumTouchTarget,
-            )
+        stateModifier
             .einkClickable(enabled = enabled, role = Role.Checkbox) {
                 onCheckedChange(!checked)
             }
-            .semantics {
-                toggleableState = ToggleableState(checked)
-                if (!enabled) disabled()
-            }
     } else {
-        modifier
+        stateModifier
     }
     Box(modifier = resolvedModifier, contentAlignment = Alignment.Center) {
         Box(
@@ -119,21 +122,23 @@ fun EinkSwitch(
 ) {
     val colors = EinkTheme.colors
     val outline = if (enabled) colors.outline else colors.disabled
+    val stateModifier = modifier
+        .sizeIn(
+            minWidth = EinkTheme.layout.minimumTouchTarget,
+            minHeight = EinkTheme.layout.minimumTouchTarget,
+        )
+        .semantics {
+            role = Role.Switch
+            toggleableState = ToggleableState(checked)
+            if (!enabled) disabled()
+        }
     val resolvedModifier = if (onCheckedChange != null) {
-        modifier
-            .sizeIn(
-                minWidth = EinkTheme.layout.minimumTouchTarget,
-                minHeight = EinkTheme.layout.minimumTouchTarget,
-            )
+        stateModifier
             .einkClickable(enabled = enabled, role = Role.Switch) {
                 onCheckedChange(!checked)
             }
-            .semantics {
-                toggleableState = ToggleableState(checked)
-                if (!enabled) disabled()
-            }
     } else {
-        modifier
+        stateModifier
     }
     Box(modifier = resolvedModifier, contentAlignment = Alignment.Center) {
         Box(
@@ -196,19 +201,21 @@ fun EinkRadioButton(
         else -> colors.outline
     }
     val radioBorderWidth = EinkTheme.borders.standard
+    val stateModifier = modifier
+        .sizeIn(
+            minWidth = EinkTheme.layout.minimumTouchTarget,
+            minHeight = EinkTheme.layout.minimumTouchTarget,
+        )
+        .semantics {
+            role = Role.RadioButton
+            this.selected = selected
+            if (!enabled) disabled()
+        }
     val resolvedModifier = if (onClick != null) {
-        modifier
-            .sizeIn(
-                minWidth = EinkTheme.layout.minimumTouchTarget,
-                minHeight = EinkTheme.layout.minimumTouchTarget,
-            )
+        stateModifier
             .einkClickable(enabled = enabled, role = Role.RadioButton, onClick = onClick)
-            .semantics {
-                this.selected = selected
-                if (!enabled) disabled()
-            }
     } else {
-        modifier
+        stateModifier
     }
     Box(modifier = resolvedModifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.size(EinkTheme.spacing.large)) {

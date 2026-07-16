@@ -46,6 +46,12 @@ object ProtocolRedactor {
             option = RegexOption.IGNORE_CASE,
         )
     }
+    private val queryValuePatterns = sensitiveJsonKeys.map { key ->
+        Regex(
+            pattern = "([?&;]|\\b)(${Regex.escape(key)}=)([^&#;\\s]*)",
+            option = RegexOption.IGNORE_CASE,
+        )
+    }
 
     fun redact(text: String): String {
         var redacted = bearer.replace(text, "Bearer $REDACTED")
@@ -55,6 +61,11 @@ object ProtocolRedactor {
         jsonValuePatterns.forEach { pattern ->
             redacted = pattern.replace(redacted) { match ->
                 "${match.groupValues[1]}\"$REDACTED\""
+            }
+        }
+        queryValuePatterns.forEach { pattern ->
+            redacted = pattern.replace(redacted) { match ->
+                "${match.groupValues[1]}${match.groupValues[2]}$REDACTED"
             }
         }
         return redacted

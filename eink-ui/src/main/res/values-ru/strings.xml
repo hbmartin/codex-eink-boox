@@ -2,6 +2,8 @@
     <string name="eink_random">Случайный</string>
     <string name="eink_decrease">Уменьшить</string>
     <string name="eink_increase">Увеличить</string>
+    <string name="eink_expanded">Развернуто</string>
+    <string name="eink_collapsed">Свернуто</string>
     <string name="eink_color_red">Красный</string>
     <string name="eink_color_pink">Розовый</string>
     <string name="eink_color_purple">Фиолетовый</string>

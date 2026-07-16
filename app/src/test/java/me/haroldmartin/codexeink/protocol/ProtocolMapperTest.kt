@@ -2,6 +2,7 @@ package me.haroldmartin.codexeink.protocol
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import me.haroldmartin.codexeink.ApprovalScope
 import me.haroldmartin.codexeink.TimelineKind
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -211,7 +212,14 @@ class ProtocolMapperTest {
         assertEquals("The task needs a new write root", approval.reason)
         assertTrue(approval.commandOrDiff.contains("Write root: /work/generated"))
         assertTrue(approval.commandOrDiff.contains("fileSystem"))
-        assertEquals(listOf("deny", "allowForTurn", "allowForSession"), approval.availableDecisions)
+        assertEquals(
+            listOf("deny", "allowForTurn", "allowForSession"),
+            approval.availableDecisions.map { it.value },
+        )
+        assertEquals(
+            listOf(ApprovalScope.OneShot, ApprovalScope.OneShot, ApprovalScope.Session),
+            approval.availableDecisions.map { it.scope },
+        )
     }
 
     @Test
@@ -237,8 +245,9 @@ class ProtocolMapperTest {
         assertEquals("s:approval-a", approval.requestId)
         assertEquals(
             listOf("decline", "acceptWithExecpolicyAmendment"),
-            approval.availableDecisions,
+            approval.availableDecisions.map { it.value },
         )
+        assertEquals(ApprovalScope.Persistent, approval.availableDecisions.last().scope)
         assertTrue(approval.commandOrDiff.contains("rm generated.tmp"))
         assertTrue(approval.commandOrDiff.contains("Working directory: /work/safe"))
     }

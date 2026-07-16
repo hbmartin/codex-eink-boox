@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,16 +46,47 @@ class CodexPresentationTest {
                 EinkApprovalPanelShell(
                     title = "Run command?",
                     cautionText = "The command can modify files.",
-                    decisionActions = {
-                        EinkButton(onClick = {}) { Text("Decline") }
-                        EinkButton(onClick = {}, emphasis = EinkButtonEmphasis.Strong) { Text("Approve") }
-                    },
+                    decisions = listOf(
+                        EinkApprovalDecision("decline", "Decline", EinkApprovalScope.OneShot),
+                        EinkApprovalDecision("approve", "Approve", EinkApprovalScope.OneShot, preferred = true),
+                    ),
+                    onDecision = {},
+                    confirmationTitle = "Confirm",
+                    confirmationText = "Confirm this durable decision",
+                    confirmLabel = "Confirm",
+                    cancelLabel = "Cancel",
                 )
             }
         }
 
         composeRule.onNodeWithText("Decline").assertHeightIsAtLeast(48.dp)
         composeRule.onNodeWithText("Approve").assertHeightIsAtLeast(48.dp)
+    }
+
+    @Test
+    fun durableApprovalRequiresSecondaryConfirmation() {
+        var receivedDecision: String? = null
+        composeRule.setContent {
+            EinkTheme {
+                EinkApprovalPanelShell(
+                    title = "Run command?",
+                    decisions = listOf(
+                        EinkApprovalDecision("session", "Allow for session", EinkApprovalScope.Session),
+                    ),
+                    onDecision = { receivedDecision = it },
+                    confirmationTitle = "Confirm durable approval",
+                    confirmationText = "This applies beyond one action.",
+                    confirmLabel = "Confirm",
+                    cancelLabel = "Cancel",
+                )
+            }
+        }
+
+        composeRule.onNodeWithText("Allow for session").performClick()
+        composeRule.onNodeWithText("Confirm durable approval").assertIsDisplayed()
+        composeRule.runOnIdle { assertEquals(null, receivedDecision) }
+        composeRule.onNodeWithText("Confirm").performClick()
+        composeRule.runOnIdle { assertEquals("session", receivedDecision) }
     }
 
     @Test

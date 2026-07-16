@@ -161,4 +161,51 @@ class ChunkAssemblerTest {
         assembler.invalidate("c", "s")
         assertEquals(ChunkAssemblyResult.Pending, assembler.offer(chunk))
     }
+
+    @Test
+    fun `expires abandoned assemblies and releases the global byte budget`() {
+        var now = 0L
+        fun chunk(sequence: Long) = RelayFrame.MessageChunk(
+            clientId = "c",
+            streamId = "s",
+            seqId = sequence,
+            direction = RelayDirection.SERVER_TO_CLIENT,
+            segmentId = 0,
+            segmentCount = 2,
+            messageSizeBytes = 4,
+            messageChunkBase64 = Base64.getEncoder().encodeToString("ab".toByteArray()),
+        )
+        val assembler = ChunkAssembler(
+            maxBufferedBytes = 2,
+            maxAssemblyAgeMillis = 100,
+            clockMillis = { now },
+        )
+
+        assertEquals(ChunkAssemblyResult.Pending, assembler.offer(chunk(1)))
+        now = 100
+        assertEquals(ChunkAssemblyResult.Pending, assembler.offer(chunk(2)))
+    }
+
+    @Test
+    fun `reports only the highest contiguous segment for out of order chunks`() {
+        fun chunk(segmentId: Int) = RelayFrame.MessageChunk(
+            clientId = "c",
+            streamId = "s",
+            seqId = 1,
+            direction = RelayDirection.SERVER_TO_CLIENT,
+            segmentId = segmentId,
+            segmentCount = 4,
+            messageSizeBytes = 4,
+            messageChunkBase64 = Base64.getEncoder().encodeToString("$segmentId".toByteArray()),
+        )
+        val assembler = ChunkAssembler()
+
+        assertEquals(ChunkAssemblyResult.Pending, assembler.offer(chunk(3)))
+        assertEquals(null, assembler.highestContiguousSegment(chunk(3)))
+        assertEquals(ChunkAssemblyResult.Pending, assembler.offer(chunk(0)))
+        assertEquals(0, assembler.highestContiguousSegment(chunk(0)))
+        assertEquals(ChunkAssemblyResult.Pending, assembler.offer(chunk(2)))
+        assertEquals(0, assembler.highestContiguousSegment(chunk(2)))
+        assertEquals(ChunkAssemblyResult.Complete("0123"), assembler.offer(chunk(1)))
+    }
 }

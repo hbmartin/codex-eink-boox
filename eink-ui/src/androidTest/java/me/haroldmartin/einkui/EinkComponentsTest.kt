@@ -1,13 +1,14 @@
 package me.haroldmartin.einkui
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -15,10 +16,12 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -59,20 +62,56 @@ class EinkComponentsTest {
     @Test
     fun stepperHonorsBounds() {
         val value = mutableIntStateOf(0)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
         composeRule.setContent {
             EinkTheme {
                 EinkStepper(value = value.intValue, onValueChange = { value.intValue = it }, valueRange = 0..1)
             }
         }
 
-        composeRule.onNodeWithContentDescription("Decrease").assertIsNotEnabled()
-        composeRule.onNodeWithContentDescription("Increase").performClick()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.eink_decrease)).assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.eink_increase)).performClick()
         composeRule.runOnIdle { assertEquals(1, value.intValue) }
-        composeRule.onNodeWithContentDescription("Increase").assertIsNotEnabled()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.eink_increase)).assertIsNotEnabled()
+    }
+
+    @Test
+    fun stepperClampsOverflowSafeArithmetic() {
+        val value = mutableIntStateOf(Int.MAX_VALUE - 1)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        composeRule.setContent {
+            EinkTheme {
+                EinkStepper(
+                    value = value.intValue,
+                    onValueChange = { value.intValue = it },
+                    valueRange = Int.MIN_VALUE..Int.MAX_VALUE,
+                    step = 10,
+                )
+            }
+        }
+
+        composeRule.onNodeWithContentDescription(context.getString(R.string.eink_increase)).performClick()
+        composeRule.runOnIdle { assertEquals(Int.MAX_VALUE, value.intValue) }
+    }
+
+    @Test
+    fun readOnlySwitchPreservesStateSemantics() {
+        composeRule.setContent {
+            EinkTheme {
+                EinkSwitch(
+                    checked = true,
+                    onCheckedChange = null,
+                    modifier = Modifier.testTag("readonly-switch"),
+                )
+            }
+        }
+
+        composeRule.onNodeWithTag("readonly-switch").assertIsOn().assertHeightIsAtLeast(48.dp)
     }
 
     @Test
     fun colorChooserExposesNamedSelectedChoices() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
         composeRule.setContent {
             val selection = remember { mutableStateOf<EinkColorChoice>(EinkColorChoice.Random) }
             EinkTheme {
@@ -83,8 +122,10 @@ class EinkComponentsTest {
             }
         }
 
-        composeRule.onNodeWithContentDescription("Random").assertIsSelected()
-        composeRule.onNodeWithContentDescription("Red").performClick().assertIsSelected()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.eink_random)).assertIsSelected()
+        composeRule.onNodeWithContentDescription(context.getString(R.string.eink_color_red))
+            .performClick()
+            .assertIsSelected()
     }
 
     @Test
@@ -146,13 +187,15 @@ class EinkComponentsTest {
     fun pickerDialogKeepsActionsOnScreen() {
         composeRule.setContent {
             EinkTheme {
-                EinkPickerDialog(
-                    onDismissRequest = {},
-                    title = { Text("Choose item") },
-                    primaryPane = { Box(modifier = Modifier.heightIn(max = 360.dp)) },
-                    confirmButton = { EinkButton(onClick = {}) { Text("Done") } },
-                    dismissButton = { EinkButton(onClick = {}) { Text("Cancel") } },
-                )
+                Box(modifier = Modifier.size(320.dp, 480.dp)) {
+                    EinkPickerDialog(
+                        onDismissRequest = {},
+                        title = { Text("Choose item") },
+                        primaryPane = { Box(modifier = Modifier.height(360.dp)) },
+                        confirmButton = { EinkButton(onClick = {}) { Text("Done") } },
+                        dismissButton = { EinkButton(onClick = {}) { Text("Cancel") } },
+                    )
+                }
             }
         }
 

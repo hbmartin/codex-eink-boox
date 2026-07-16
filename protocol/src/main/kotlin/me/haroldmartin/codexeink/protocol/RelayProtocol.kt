@@ -289,6 +289,8 @@ class ChunkAssembler(
     private val maxMessageBytes: Int = 8 * 1024 * 1024,
     private val maxConcurrentAssemblies: Int = 32,
     private val maxBufferedBytes: Int = 16 * 1024 * 1024,
+    private val maxAssemblyAgeMillis: Long = 60_000,
+    private val clockMillis: () -> Long = { System.nanoTime() / 1_000_000L },
 ) {
     private data class Key(val clientId: String, val streamId: String, val seqId: Long)
     private data class Assembly(
@@ -296,6 +298,7 @@ class ChunkAssembler(
         val messageSizeBytes: Int,
         val segments: MutableMap<Int, ByteArray> = mutableMapOf(),
         var bufferedBytes: Int = 0,
+        val createdAtMillis: Long,
     )
 
     private val assemblies = ConcurrentHashMap<Key, Assembly>()
@@ -307,10 +310,13 @@ class ChunkAssembler(
         require(maxMessageBytes > 0)
         require(maxConcurrentAssemblies > 0)
         require(maxBufferedBytes > 0)
+        require(maxAssemblyAgeMillis > 0)
     }
 
     @Synchronized
     fun offer(chunk: RelayFrame.MessageChunk): ChunkAssemblyResult {
+        val now = clockMillis()
+        expireStaleAssemblies(now)
         val streamId = chunk.streamId ?: return ChunkAssemblyResult.Rejected("missing stream_id")
         val seqId = chunk.seqId ?: return ChunkAssemblyResult.Rejected("missing seq_id")
         if (chunk.segmentCount !in 1..maxSegmentCount) {
@@ -341,7 +347,7 @@ class ChunkAssembler(
             if (assemblies.size >= maxConcurrentAssemblies) {
                 return ChunkAssemblyResult.Rejected("too many concurrent assemblies")
             }
-            assembly = Assembly(chunk.segmentCount, chunk.messageSizeBytes)
+            assembly = Assembly(chunk.segmentCount, chunk.messageSizeBytes, createdAtMillis = now)
             assemblies[key] = assembly
         }
         if (assembly.segmentCount != chunk.segmentCount || assembly.messageSizeBytes != chunk.messageSizeBytes) {
@@ -395,6 +401,25 @@ class ChunkAssembler(
     fun invalidate(clientId: String, streamId: String? = null) {
         assemblies.keys
             .filter { key -> key.clientId == clientId && (streamId == null || key.streamId == streamId) }
+            .forEach(::removeAssembly)
+    }
+
+    @Synchronized
+    fun highestContiguousSegment(chunk: RelayFrame.MessageChunk): Int? {
+        val streamId = chunk.streamId ?: return null
+        val seqId = chunk.seqId ?: return null
+        val assembly = assemblies[Key(chunk.clientId, streamId, seqId)] ?: return null
+        var segmentId = 0
+        while (segmentId < assembly.segmentCount && assembly.segments.containsKey(segmentId)) {
+            segmentId++
+        }
+        return (segmentId - 1).takeIf { it >= 0 }
+    }
+
+    private fun expireStaleAssemblies(now: Long) {
+        assemblies.entries
+            .filter { (_, assembly) -> now - assembly.createdAtMillis >= maxAssemblyAgeMillis }
+            .map { it.key }
             .forEach(::removeAssembly)
     }
 

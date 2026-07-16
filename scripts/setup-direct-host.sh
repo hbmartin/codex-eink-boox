@@ -38,11 +38,6 @@ while (($#)); do
   esac
 done
 
-command -v codex >/dev/null || {
-  printf 'codex is not installed or not on PATH.\n' >&2
-  exit 1
-}
-
 if [[ -z "$bind_ip" ]] && command -v tailscale >/dev/null; then
   bind_ip="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"
 fi
@@ -54,6 +49,33 @@ if [[ ! "$port" =~ ^[0-9]+$ ]] || ((port < 1024 || port > 65535)); then
   printf 'Port must be an integer from 1024 through 65535.\n' >&2
   exit 2
 fi
+is_safe_bind_address() {
+  local address="$1"
+  if [[ "$address" == "::1" || "$address" =~ ^[fF][dD]7[aA]:115[cC]:[aA]1[eE]0: ]]; then
+    return 0
+  fi
+  if [[ "$address" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]]; then
+    local first=$((10#${BASH_REMATCH[1]}))
+    local second=$((10#${BASH_REMATCH[2]}))
+    local third=$((10#${BASH_REMATCH[3]}))
+    local fourth=$((10#${BASH_REMATCH[4]}))
+    if ((first > 255 || second > 255 || third > 255 || fourth > 255)); then
+      return 1
+    fi
+    ((first == 127 || (first == 100 && second >= 64 && second <= 127)))
+    return
+  fi
+  return 1
+}
+if ! is_safe_bind_address "$bind_ip"; then
+  printf 'Bind address must be loopback or a Tailscale IP address.\n' >&2
+  exit 2
+fi
+
+command -v codex >/dev/null || {
+  printf 'codex is not installed or not on PATH.\n' >&2
+  exit 1
+}
 
 state_dir="${CODEX_HOME:-$HOME/.codex}/codex-eink"
 token_file="$state_dir/app-server-token"
@@ -70,7 +92,11 @@ if [[ ! -s "$token_file" ]]; then
 fi
 chmod 600 "$token_file"
 
-endpoint="ws://$bind_ip:$port"
+endpoint_host="$bind_ip"
+if [[ "$bind_ip" == *:* ]]; then
+  endpoint_host="[$bind_ip]"
+fi
+endpoint="ws://$endpoint_host:$port"
 printf 'Endpoint: %s\n' "$endpoint"
 printf 'Token file: %s\n' "$token_file"
 printf 'Copy the token into Codex Eink over a trusted channel. It will not be printed here.\n'

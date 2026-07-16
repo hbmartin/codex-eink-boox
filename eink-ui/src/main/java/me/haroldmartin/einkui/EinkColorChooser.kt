@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
@@ -101,21 +102,32 @@ private fun ColorSwatch(
     }
     val borderWidth = if (selected) EinkTheme.borders.strong else EinkTheme.borders.standard
     val checkColor = if (color.luminance() > LIGHT_COLOR_THRESHOLD) Color.Black else Color.White
-    Box(
-        modifier = Modifier
-            .size(EinkTheme.layout.minimumTouchTarget)
-            .clip(EinkTheme.shapes.control)
-            .background(color)
-            .border(borderWidth, outline, EinkTheme.shapes.control)
-            .einkClickable(enabled = enabled, role = Role.RadioButton, onClick = onClick)
-            .semantics {
-                contentDescription = description
-                this.selected = selected
-                if (!enabled) disabled()
-            },
-        contentAlignment = Alignment.Center,
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(EinkTheme.spacing.extraSmall),
     ) {
-        if (selected) SelectedCheckmark(checkColor)
+        Box(
+            modifier = Modifier
+                .size(EinkTheme.layout.minimumTouchTarget)
+                .clip(EinkTheme.shapes.control)
+                .background(color)
+                .border(borderWidth, outline, EinkTheme.shapes.control)
+                .einkClickable(enabled = enabled, role = Role.RadioButton, onClick = onClick)
+                .semantics {
+                    contentDescription = description
+                    this.selected = selected
+                    if (!enabled) disabled()
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) SelectedCheckmark(checkColor)
+        }
+        Text(
+            text = description,
+            color = if (enabled) EinkTheme.colors.content else EinkTheme.colors.disabled,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            style = EinkTheme.typography.supporting,
+        )
     }
 }
 
@@ -128,32 +140,33 @@ private fun RandomSwatch(selected: Boolean, enabled: Boolean, onClick: () -> Uni
         else -> EinkTheme.colors.outline
     }
     val borderWidth = if (selected) EinkTheme.borders.strong else EinkTheme.borders.standard
-    Box(
-        modifier = Modifier
-            .height(EinkTheme.layout.minimumTouchTarget)
-            .widthIn(min = EinkTheme.layout.minimumTouchTarget)
-            .clip(EinkTheme.shapes.control)
-            .background(EinkTheme.colors.surface)
-            .border(borderWidth, outline, EinkTheme.shapes.control)
-            .einkClickable(enabled = enabled, role = Role.RadioButton, onClick = onClick)
-            .semantics {
-                contentDescription = description
-                this.selected = selected
-                if (!enabled) disabled()
-            },
-        contentAlignment = Alignment.Center,
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(EinkTheme.spacing.extraSmall),
     ) {
-        if (selected) {
-            SelectedCheckmark(EinkTheme.colors.accent)
-        } else {
-            Text(
-                text = description,
-                modifier = Modifier.padding(horizontal = EinkTheme.spacing.small),
-                color = if (enabled) EinkTheme.colors.content else EinkTheme.colors.disabled,
-                fontWeight = FontWeight.Bold,
-                style = EinkTheme.typography.supporting,
-            )
+        Box(
+            modifier = Modifier
+                .height(EinkTheme.layout.minimumTouchTarget)
+                .widthIn(min = EinkTheme.layout.minimumTouchTarget)
+                .clip(EinkTheme.shapes.control)
+                .background(EinkTheme.colors.surface)
+                .border(borderWidth, outline, EinkTheme.shapes.control)
+                .einkClickable(enabled = enabled, role = Role.RadioButton, onClick = onClick)
+                .semantics {
+                    contentDescription = description
+                    this.selected = selected
+                    if (!enabled) disabled()
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (selected) SelectedCheckmark(EinkTheme.colors.accent)
         }
+        Text(
+            text = description,
+            color = if (enabled) EinkTheme.colors.content else EinkTheme.colors.disabled,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            style = EinkTheme.typography.supporting,
+        )
     }
 }
 

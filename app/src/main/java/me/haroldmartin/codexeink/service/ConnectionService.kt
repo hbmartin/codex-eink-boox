@@ -24,6 +24,7 @@ import me.haroldmartin.codexeink.CodexEinkApplication
 import me.haroldmartin.codexeink.Connectivity
 import me.haroldmartin.codexeink.MainActivity
 import me.haroldmartin.codexeink.R
+import me.haroldmartin.codexeink.labelResource
 
 class ConnectionService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -45,10 +46,16 @@ class ConnectionService : Service() {
                 val attentionKey = approvalKey ?: questionKey
                 if (attentionKey != null && attentionKey != previousAttentionKey) {
                     postAttentionNotification(
-                        title = if (approvalKey != null) "Codex needs approval" else "Codex has a question",
+                        title = getString(
+                            if (approvalKey != null) {
+                                R.string.notification_needs_approval
+                            } else {
+                                R.string.notification_has_question
+                            },
+                        ),
                         body = state.pendingApproval?.title
                             ?: state.pendingQuestion?.questions?.firstOrNull()?.prompt
-                            ?: "Open Codex Eink to respond.",
+                            ?: getString(R.string.notification_open_to_respond),
                     )
                 }
                 if (
@@ -58,14 +65,14 @@ class ConnectionService : Service() {
                     state.connectivity == Connectivity.Connected
                 ) {
                     postAttentionNotification(
-                        title = "Codex task finished",
-                        body = "Open Codex Eink to review the result.",
+                        title = getString(R.string.notification_task_finished),
+                        body = getString(R.string.notification_review_result),
                     )
                 }
                 if (state.connectivity == Connectivity.Failed && previousConnectivity != Connectivity.Failed) {
                     postAttentionNotification(
-                        title = "Codex connection failed",
-                        body = state.error ?: "Open Codex Eink to reconnect.",
+                        title = getString(R.string.notification_connection_failed),
+                        body = state.error ?: getString(R.string.notification_open_to_reconnect),
                     )
                 }
                 previousAttentionKey = attentionKey
@@ -132,7 +139,7 @@ class ConnectionService : Service() {
                 getString(R.string.connection_notification_reconnecting)
             else -> getString(R.string.connection_notification_attention)
         }
-        val body = environment ?: connectivity.name.replaceFirstChar(Char::uppercase)
+        val body = environment ?: getString(connectivity.labelResource)
         return NotificationCompat.Builder(this, CONNECTION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
@@ -143,7 +150,7 @@ class ConnectionService : Service() {
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setPublicVersion(publicConnectionNotification(connectivity))
             .setContentIntent(openAppIntent())
-            .addAction(0, "Disconnect", stopServiceIntent())
+            .addAction(0, getString(R.string.disconnect), stopServiceIntent())
             .build()
     }
 
@@ -174,7 +181,7 @@ class ConnectionService : Service() {
         NotificationCompat.Builder(this, CONNECTION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText(connectivity.name.replaceFirstChar(Char::uppercase))
+            .setContentText(getString(connectivity.labelResource))
             .setContentIntent(openAppIntent())
             .build()
 
@@ -182,7 +189,7 @@ class ConnectionService : Service() {
         NotificationCompat.Builder(this, ATTENTION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.app_name))
-            .setContentText("Open the app to review a Codex update.")
+            .setContentText(getString(R.string.notification_open_update))
             .setContentIntent(openAppIntent())
             .build()
 

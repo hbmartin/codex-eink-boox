@@ -21,9 +21,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
 
 @Composable
@@ -64,11 +66,15 @@ fun EinkDisclosureRow(
     modifier: Modifier = Modifier,
     content: @Composable RowScope.() -> Unit,
 ) {
+    val disclosureState = stringResource(
+        if (expanded) R.string.eink_expanded else R.string.eink_collapsed,
+    )
     Row(
         modifier = modifier
             .fillMaxWidth()
             .sizeIn(minHeight = EinkTheme.layout.minimumTouchTarget)
             .einkClickable(role = Role.Button) { onExpandedChange(!expanded) }
+            .semantics { stateDescription = disclosureState }
             .padding(vertical = EinkTheme.spacing.small),
         horizontalArrangement = Arrangement.spacedBy(EinkTheme.spacing.small),
         verticalAlignment = Alignment.CenterVertically,

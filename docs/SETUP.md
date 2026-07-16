@@ -5,8 +5,8 @@ Codex host. Codex Eink is experimental and is not an official OpenAI client.
 
 > [!IMPORTANT]
 > **Direct diagnostic** is the only working connection mode in this repository. **Managed Remote** is a
-> compatibility placeholder: entering or scanning a pairing code reports an incompatibility and does not
-> exchange or store the pairing material. Controller enrollment and authentication must remain disabled
+> compatibility placeholder: pairing controls are disabled, and deep-link pairing attempts report an
+> incompatibility without exchanging or storing pairing material. Controller enrollment and authentication must remain disabled
 > until they pass the clean-room end-to-end gate described in
 > [`research/PROTOCOL.md`](../research/PROTOCOL.md#controller-interoperability-gate).
 
@@ -51,7 +51,6 @@ can introduce version drift.
 
 - Android 11/API 30 or newer.
 - Permission to install an APK from your chosen file manager, browser, or USB debugging host.
-- Camera permission only if scanning a QR code. Direct diagnostic setup does not need it.
 - Notification permission on Android 13+ if background connection is enabled.
 - For the Tailscale path, a Tailscale client joined to the same user-controlled tailnet as the host.
 
@@ -164,6 +163,11 @@ secrets:
 It decodes the keystore into temporary runner storage, builds and verifies `app-release.apk`, uploads it as
 `codex-eink.apk`, and removes the temporary file. Base64 is only an encoding, not encryption; access to the
 Actions secrets and release-publishing permission must remain tightly restricted.
+
+Create a GitHub environment named `release`, restrict it to the intended release branches or tags, require
+reviewers, and store the signing secrets in that environment rather than as unrestricted repository
+secrets. The workflow declares this environment, but repository administrators must configure its
+protection rules in GitHub settings before publishing.
 
 Automated signing makes releases reproducible and updateable, but it concentrates a long-lived app identity
 in CI. Back up the keystore securely, restrict who can publish releases or modify workflows, and retain the
