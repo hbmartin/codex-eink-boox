@@ -21,23 +21,35 @@ It is a standalone Kotlin/Jetpack Compose project optimized for Android 11 and n
 - Optional always-connected foreground service with reconnect, attention notifications, and boot recovery.
 - Clean-room APK research scripts that keep proprietary artifacts, decompiled code, and captures out of Git.
 
-## Build
+## Setup and build
 
-Requirements:
+See the [setup guide](docs/SETUP.md) for workstation and BOOX preparation, installation, connection
+options, credential handling, background behavior, troubleshooting, and the tradeoffs between debug,
+release, Tailscale, USB, and TLS-terminated setups.
 
-- JDK 21
-- Android SDK 37
+The shortest path to an installable development build requires JDK 21 and Android SDK 37:
+
+```bash
+./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+`adb` is optional; the APK can also be copied to a BOOX device and opened there. Before handing off a
+change, run the complete repository check (Python 3.10+ is also required for its research-tool tests):
 
 ```bash
 ./scripts/verify.sh
 ```
 
-The sideloadable APK is written to `app/build/outputs/apk/debug/`.
+The debug APK is sideloadable. Without the release-signing environment variables described in the
+[setup guide](docs/SETUP.md#release-signing-and-publishing), `assembleRelease` produces an unsigned artifact
+that cannot be installed or distributed as a release APK.
 
 ## Direct diagnostic connection
 
-This mode is for app-server protocol/UI development on a trusted private network. Never expose an
-unauthenticated app-server listener to the internet.
+This mode is for app-server protocol/UI development on a trusted private network. It creates a new
+app-server endpoint for this client; it does not attach to or co-control a separately running Codex Desktop
+task. Never expose the listener or its capability token to the public internet.
 
 On the host, either run `./scripts/setup-direct-host.sh --bind TAILSCALE_IP` or create a high-entropy token file
 and start Codex with capability-token authentication manually:
@@ -54,6 +66,8 @@ codex app-server \
 
 Enter the private WebSocket URL and token under **Direct diagnostic**. Debug builds allow `ws://` only
 for loopback and Tailscale addresses; ordinary LAN addresses and release builds require `wss://`.
+The [setup guide](docs/SETUP.md#choose-a-connection-path) covers the security and operational tradeoffs of
+each transport.
 
 ## BOOX setup
 
@@ -70,7 +84,8 @@ code, redacted fixtures, hashes, and independently written protocol notes belong
 ## Modules
 
 - `app` — Android UI, encrypted settings, notifications, foreground service, and protocol adapter.
-- `protocol` — transport-neutral JSON-RPC, relay framing, state models, reducers, and WebSocket clients.
+- `protocol` — active direct JSON-RPC/WebSocket support plus experimental relay framing and test-only domain
+  reducer primitives; see [`protocol/README.md`](protocol/README.md) for the runtime boundary.
 - `eink-ui` — self-contained monochrome Compose design system derived from the GoL Screensaver project.
 - `research` — reproducible clean-room acquisition, verification, indexing, and compatibility notes.
 
