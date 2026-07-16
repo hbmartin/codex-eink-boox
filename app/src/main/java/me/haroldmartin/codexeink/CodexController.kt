@@ -50,6 +50,8 @@ data class CodexUiState(
     val pendingApproval: ApprovalUi? = null,
     val pendingQuestion: QuestionUi? = null,
     val loading: Boolean = false,
+    val sendingMessage: Boolean = false,
+    val sentMessageSequence: Long = 0,
     val error: String? = null,
 )
 
@@ -89,7 +91,18 @@ data class ApprovalUi(
     val title: String,
     val reason: String?,
     val commandOrDiff: String,
-    val availableDecisions: List<String>,
+    val availableDecisions: List<ApprovalDecisionUi>,
+)
+
+enum class ApprovalScope {
+    OneShot,
+    Session,
+    Persistent,
+}
+
+data class ApprovalDecisionUi(
+    val value: String,
+    val scope: ApprovalScope,
 )
 
 data class QuestionUi(

@@ -11,4 +11,6 @@
     <string name="eink_color_blue_gray">Blue gray</string>
     <string name="eink_color_black">Black</string>
     <string name="eink_color_white">White</string>
+    <string name="eink_expanded">Expanded</string>
+    <string name="eink_collapsed">Collapsed</string>
 </resources>

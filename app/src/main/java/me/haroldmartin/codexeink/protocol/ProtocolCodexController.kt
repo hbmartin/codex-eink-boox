@@ -84,7 +84,8 @@ class ProtocolCodexController(
     override suspend fun connectStored() {
         val stored = try {
             credentialStore.read()
-        } catch (_: Throwable) {
+        } catch (error: Throwable) {
+            if (error is CancellationException) throw error
             mutableState.update {
                 it.copy(
                     connectivity = Connectivity.Failed,
@@ -172,50 +173,56 @@ class ProtocolCodexController(
     override suspend fun send(text: String) {
         val message = text.trim()
         if (message.isEmpty()) return
-        runUserAction("Unable to send the message") {
-            val current = requireReadyConnection()
-            val threadId = mutableState.value.selectedThreadId
-                ?: throw IllegalStateException("Open a task before sending a message")
-            val turnId = activeTurns[threadId]
-            val method = if (turnId == null) "turn/start" else "turn/steer"
-            val response = current.request(
-                method = method,
-                params = buildJsonObject {
-                    put("threadId", threadId)
-                    put("clientUserMessageId", UUID.randomUUID().toString())
-                    put(
-                        "input",
-                        buildJsonArray {
-                            add(
-                                buildJsonObject {
-                                    put("type", "text")
-                                    put("text", message)
-                                },
-                            )
-                        },
-                    )
-                    turnId?.let { put("expectedTurnId", it) }
-                },
-            )
-            val result = response.resultOrThrow(method).objectOrNull()
-            val responseTurnId = if (turnId == null) {
-                result?.get("turn").objectOrNull()?.string("id")
-            } else {
-                result?.string("turnId")
-            }
-            if (responseTurnId != null && !consumeRecentlyCompleted(responseTurnId)) {
-                activeTurns[threadId] = responseTurnId
-            }
-            mutableState.update { state ->
-                if (state.selectedThreadId == threadId) {
-                    state.copy(
-                        activeTurn = activeTurns[threadId] != null,
-                        error = null,
-                    )
+        mutableState.update { it.copy(sendingMessage = true, error = null) }
+        try {
+            runUserAction("Unable to send the message") {
+                val current = requireReadyConnection()
+                val threadId = mutableState.value.selectedThreadId
+                    ?: throw IllegalStateException("Open a task before sending a message")
+                val turnId = activeTurns[threadId]
+                val method = if (turnId == null) "turn/start" else "turn/steer"
+                val response = current.request(
+                    method = method,
+                    params = buildJsonObject {
+                        put("threadId", threadId)
+                        put("clientUserMessageId", UUID.randomUUID().toString())
+                        put(
+                            "input",
+                            buildJsonArray {
+                                add(
+                                    buildJsonObject {
+                                        put("type", "text")
+                                        put("text", message)
+                                    },
+                                )
+                            },
+                        )
+                        turnId?.let { put("expectedTurnId", it) }
+                    },
+                )
+                val result = response.resultOrThrow(method).objectOrNull()
+                val responseTurnId = if (turnId == null) {
+                    result?.get("turn").objectOrNull()?.string("id")
                 } else {
-                    state
+                    result?.string("turnId")
+                }
+                if (responseTurnId != null && !consumeRecentlyCompleted(responseTurnId)) {
+                    activeTurns[threadId] = responseTurnId
+                }
+                mutableState.update { state ->
+                    if (state.selectedThreadId == threadId) {
+                        state.copy(
+                            activeTurn = activeTurns[threadId] != null,
+                            sentMessageSequence = state.sentMessageSequence + 1,
+                            error = null,
+                        )
+                    } else {
+                        state
+                    }
                 }
             }
+        } finally {
+            mutableState.update { it.copy(sendingMessage = false) }
         }
     }
 
@@ -303,8 +310,10 @@ class ProtocolCodexController(
     private suspend fun connectProfile(requestedProfile: ConnectionProfile) {
         validateProfile(requestedProfile)
         if (requestedProfile.mode == TransportMode.ManagedRelay) {
-            closeConnection()
-            profile = requestedProfile
+            lifecycleMutex.withLock {
+                closeConnectionLocked()
+                profile = requestedProfile
+            }
             mutableState.update {
                 it.copy(
                     connectivity = Connectivity.Incompatible,
@@ -360,45 +369,13 @@ class ProtocolCodexController(
             observed.state.collectLatest { connectionState ->
                 if (connection !== observed) return@collectLatest
                 when (connectionState) {
-                    is ConnectionState.Disconnected -> mutableState.update {
-                        if (protocolHandshakeFailed) {
-                            it.copy(activeTurn = false, loading = false)
-                        } else {
-                            it.copy(
-                                connectivity = Connectivity.Disconnected,
-                                connectionMessage = "Disconnected.",
-                                activeTurn = false,
-                                loading = false,
-                            )
-                        }
-                    }
-                    is ConnectionState.Connecting -> {
-                        initializedSessionId = null
-                        mutableState.update {
-                            it.copy(
-                                connectivity = Connectivity.Connecting,
-                                connectionMessage = "Connecting (attempt ${connectionState.attempt + 1})…",
-                                loading = false,
-                            )
-                        }
-                    }
+                    is ConnectionState.Disconnected -> onDisconnected()
+                    is ConnectionState.Connecting -> onConnecting(connectionState)
                     is ConnectionState.Connected -> initializeConnectedSession(
                         observed,
                         connectionState.sessionId ?: "connected",
                     )
-                    is ConnectionState.Reconnecting -> {
-                        initializedSessionId = null
-                        clearTransientSessionState()
-                        mutableState.update {
-                            it.copy(
-                                connectivity = Connectivity.Reconnecting,
-                                connectionMessage = "Connection lost; retrying in ${connectionState.delayMillis / 1_000 + 1}s…",
-                                activeTurn = false,
-                                loading = false,
-                                error = connectionState.reason,
-                            )
-                        }
-                    }
+                    is ConnectionState.Reconnecting -> onReconnecting(connectionState)
                     ConnectionState.Closing -> mutableState.update {
                         if (protocolHandshakeFailed) {
                             it.copy(activeTurn = false, loading = false)
@@ -410,18 +387,7 @@ class ProtocolCodexController(
                             )
                         }
                     }
-                    is ConnectionState.Failed -> {
-                        initializedSessionId = null
-                        mutableState.update {
-                            it.copy(
-                                connectivity = Connectivity.Failed,
-                                connectionMessage = "Connection failed.",
-                                activeTurn = false,
-                                loading = false,
-                                error = ProtocolRedactor.redact(connectionState.reason),
-                            )
-                        }
-                    }
+                    is ConnectionState.Failed -> onFailed(connectionState)
                 }
             }
         }
@@ -438,6 +404,59 @@ class ProtocolCodexController(
                     )
                 }
             }
+        }
+    }
+
+    private fun onDisconnected() {
+        mutableState.update {
+            if (protocolHandshakeFailed) {
+                it.copy(activeTurn = false, loading = false)
+            } else {
+                it.copy(
+                    connectivity = Connectivity.Disconnected,
+                    connectionMessage = "Disconnected.",
+                    activeTurn = false,
+                    loading = false,
+                )
+            }
+        }
+    }
+
+    private fun onConnecting(state: ConnectionState.Connecting) {
+        initializedSessionId = null
+        mutableState.update {
+            it.copy(
+                connectivity = Connectivity.Connecting,
+                connectionMessage = "Connecting (attempt ${state.attempt + 1})…",
+                loading = false,
+            )
+        }
+    }
+
+    private fun onReconnecting(state: ConnectionState.Reconnecting) {
+        initializedSessionId = null
+        clearTransientSessionState()
+        mutableState.update {
+            it.copy(
+                connectivity = Connectivity.Reconnecting,
+                connectionMessage = "Connection lost; retrying in ${state.delayMillis / 1_000 + 1}s…",
+                activeTurn = false,
+                loading = false,
+                error = state.reason,
+            )
+        }
+    }
+
+    private fun onFailed(state: ConnectionState.Failed) {
+        initializedSessionId = null
+        mutableState.update {
+            it.copy(
+                connectivity = Connectivity.Failed,
+                connectionMessage = "Connection failed.",
+                activeTurn = false,
+                loading = false,
+                error = ProtocolRedactor.redact(state.reason),
+            )
         }
     }
 
@@ -992,7 +1011,7 @@ class ProtocolCodexController(
             }
         }
 
-        val offered = pending.approval?.availableDecisions.orEmpty()
+        val offered = pending.approval?.availableDecisions.orEmpty().map { it.value }
         require(decision in offered) { "This decision was not offered by the host" }
         val wireDecision: JsonElement = when (decision) {
             "acceptWithExecpolicyAmendment" -> {
@@ -1148,10 +1167,8 @@ class ProtocolCodexController(
 
     private fun validateProfile(profile: ConnectionProfile) {
         require(profile.displayName.isNotBlank()) { "Host name is required" }
+        if (profile.mode == TransportMode.ManagedRelay) return
         require(profile.credential.isNotBlank()) { "A capability token is required" }
-        require(profile.mode == TransportMode.DirectDiagnostic) {
-            MANAGED_REMOTE_GATE_DETAIL
-        }
         val endpoint = runCatching { URI(profile.endpoint.trim()) }
             .getOrElse { throw IllegalArgumentException("Enter a valid WebSocket endpoint") }
         val scheme = endpoint.scheme?.lowercase()

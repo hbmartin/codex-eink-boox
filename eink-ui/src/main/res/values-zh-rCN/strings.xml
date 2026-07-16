@@ -2,6 +2,8 @@
     <string name="eink_random">随机</string>
     <string name="eink_decrease">减少</string>
     <string name="eink_increase">增加</string>
+    <string name="eink_expanded">已展开</string>
+    <string name="eink_collapsed">已折叠</string>
     <string name="eink_color_red">红色</string>
     <string name="eink_color_pink">粉色</string>
     <string name="eink_color_purple">紫色</string>

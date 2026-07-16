@@ -1,7 +1,6 @@
 package me.haroldmartin.codexeink
 
 import android.app.Application
-import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
@@ -13,8 +12,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import me.haroldmartin.codexeink.data.ConnectionProfile
-import me.haroldmartin.codexeink.pairing.PairingCodeParser
-import me.haroldmartin.codexeink.pairing.QrCodeDecoder
 import me.haroldmartin.codexeink.service.ConnectionService
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -43,16 +40,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun pair(code: String) = launch { controller.pair(code) }
-
-    fun pairQr(uri: Uri) = launch {
-        try {
-            QrCodeDecoder.decode(getApplication<Application>().contentResolver, uri)
-                ?.let(PairingCodeParser::parse)
-                ?.let { controller.pair(it) }
-        } finally {
-            getApplication<Application>().contentResolver.delete(uri, null, null)
-        }
-    }
 
     fun refresh() = launch { controller.refreshThreads() }
 

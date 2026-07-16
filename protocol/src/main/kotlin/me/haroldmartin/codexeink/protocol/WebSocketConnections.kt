@@ -4,10 +4,12 @@ import java.io.IOException
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -54,6 +56,9 @@ internal fun sendFrames(frames: List<String>, send: (String) -> Boolean): FrameS
     }
     return FrameSendResult(acceptedFrames = accepted, totalFrames = frames.size)
 }
+
+internal fun RelayFrame.isInScope(clientId: String, streamId: String): Boolean =
+    this.clientId == clientId && this.streamId == streamId
 
 fun interface ConnectionHeadersProvider {
     /** Returns fresh headers for every connection attempt. Never persist or log the returned values. */
@@ -272,6 +277,10 @@ class ManagedRelayConnection internal constructor(
             return
         }
 
+        if (!frame.isInScope(config.clientId, config.streamId)) {
+            protocolError("Managed relay frame is outside the active client or stream")
+            return
+        }
         frame.cursor?.let { mutableCursor.value = it }
         when (frame) {
             is RelayFrame.Message -> {
@@ -293,18 +302,20 @@ class ManagedRelayConnection internal constructor(
                     return
                 }
                 if (wasAlreadyDelivered(frame.seqId)) {
-                    acknowledge(frame, segmentId = frame.segmentId)
+                    acknowledge(frame, segmentId = frame.segmentCount - 1)
                     return
                 }
                 when (val result = chunkAssembler.offer(frame)) {
                     ChunkAssemblyResult.Pending,
                     ChunkAssemblyResult.Duplicate,
-                    -> acknowledge(frame, segmentId = frame.segmentId)
+                    -> chunkAssembler.highestContiguousSegment(frame)?.let { segmentId ->
+                        acknowledge(frame, segmentId = segmentId)
+                    }
                     is ChunkAssemblyResult.Complete -> {
                         try {
                             receive(jsonRpcCodec.decode(result.messageJson))
                             markDelivered(frame.seqId)
-                            acknowledge(frame, segmentId = frame.segmentId)
+                            acknowledge(frame, segmentId = frame.segmentCount - 1)
                         } catch (error: JsonRpcCodecException) {
                             protocolError(error.message ?: "Malformed reassembled JSON-RPC message")
                         }
@@ -395,19 +406,24 @@ abstract class OkHttpCodexConnection internal constructor(
     private var lostGeneration = Long.MIN_VALUE
     private var socket: WebSocket? = null
     private var reconnectJob: Job? = null
+    private var stabilityJob: Job? = null
 
-    override suspend fun connect(): Unit = lifecycleMutex.withLock {
-        if (state.value is ConnectionState.Connected || state.value is ConnectionState.Connecting) {
-            return@withLock
+    override suspend fun connect() {
+        val shouldConnect = lifecycleMutex.withLock {
+            if (state.value is ConnectionState.Connected || state.value is ConnectionState.Connecting) {
+                false
+            } else {
+                validateEndpoint()
+                val scheduled = synchronized(monitor) {
+                    manuallyDisconnected = false
+                    reconnectJob.also { reconnectJob = null }
+                }
+                scheduled?.cancel()
+                mutableState.value = ConnectionState.Connecting()
+                true
+            }
         }
-        validateEndpoint()
-        val scheduled = synchronized(monitor) {
-            manuallyDisconnected = false
-            reconnectJob.also { reconnectJob = null }
-        }
-        scheduled?.cancel()
-        mutableState.value = ConnectionState.Connecting()
-        openOnce(awaitOpen = true)
+        if (shouldConnect) openOnce(awaitOpen = true)
     }
 
     override suspend fun disconnect(code: Int, reason: String) = lifecycleMutex.withLock {
@@ -420,6 +436,8 @@ abstract class OkHttpCodexConnection internal constructor(
             active to pendingReconnect
         }
         scheduled?.cancel()
+        stabilityJob?.cancel()
+        stabilityJob = null
         existing?.close(code, reason.take(123))
         onSocketLost()
         failPendingRequests(IOException("Connection closed by client"))
@@ -450,21 +468,29 @@ abstract class OkHttpCodexConnection internal constructor(
     private suspend fun openOnce(awaitOpen: Boolean) {
         val headers = try {
             headersProvider.headers()
+        } catch (error: CancellationException) {
+            if (!synchronized(monitor) { manuallyDisconnected }) {
+                mutableState.value = ConnectionState.Disconnected
+            }
+            throw error
         } catch (error: Throwable) {
             scheduleReconnect(error)
             throw IOException("Unable to obtain connection headers", error)
         }
-        validateHeaders(headers)
-        if (!allowCleartext && endpoint.startsWith("ws://", ignoreCase = true) && headers.isNotEmpty()) {
-            val error = IOException("Refusing to send connection headers over cleartext WebSocket")
+        val requestBuilder = try {
+            validateHeaders(headers)
+            if (!allowCleartext && endpoint.startsWith("ws://", ignoreCase = true) && headers.isNotEmpty()) {
+                throw IllegalArgumentException("Refusing to send connection headers over cleartext WebSocket")
+            }
+            Request.Builder().url(endpoint).also { builder -> headers.forEach(builder::header) }
+        } catch (error: IllegalArgumentException) {
+            synchronized(monitor) { manuallyDisconnected = true }
             mutableState.value = ConnectionState.Failed(error.message.orEmpty(), recoverable = false)
             throw error
         }
-
-        val requestBuilder = Request.Builder().url(endpoint)
-        headers.forEach(requestBuilder::header)
         val opened = CompletableDeferred<Unit>()
         val currentGeneration = synchronized(monitor) {
+            if (manuallyDisconnected) throw CancellationException("Connection attempt was cancelled")
             generation += 1
             lostGeneration = Long.MIN_VALUE
             generation
@@ -472,7 +498,11 @@ abstract class OkHttpCodexConnection internal constructor(
         val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 val current = synchronized(monitor) {
-                    if (currentGeneration != generation || manuallyDisconnected) {
+                    if (
+                        currentGeneration != generation ||
+                        lostGeneration == currentGeneration ||
+                        manuallyDisconnected
+                    ) {
                         false
                     } else {
                         socket = webSocket
@@ -480,13 +510,18 @@ abstract class OkHttpCodexConnection internal constructor(
                     }
                 }
                 if (!current) {
+                    opened.completeExceptionally(CancellationException("Connection attempt became stale"))
                     webSocket.close(1000, "stale connection")
                     return
                 }
-                backoff?.reset()
                 mutableState.value = ConnectionState.Connected(sessionId = currentGeneration.toString())
                 opened.complete(Unit)
                 onSocketOpened(currentGeneration)
+                stabilityJob?.cancel()
+                stabilityJob = scope.launch {
+                    delay(RECONNECT_STABILITY_MILLIS)
+                    if (isCurrent(currentGeneration, webSocket)) backoff?.reset()
+                }
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -517,10 +552,37 @@ abstract class OkHttpCodexConnection internal constructor(
         if (!awaitOpen) return
         try {
             withTimeout(connectTimeoutMillis) { opened.await() }
+        } catch (error: TimeoutCancellationException) {
+            createdSocket.cancel()
+            handleLoss(currentGeneration, error, opened)
+            throw error
+        } catch (error: CancellationException) {
+            createdSocket.cancel()
+            abandonAttempt(currentGeneration)
+            throw error
         } catch (error: Throwable) {
             createdSocket.cancel()
             handleLoss(currentGeneration, error, opened)
             throw error
+        }
+    }
+
+    private fun abandonAttempt(currentGeneration: Long) {
+        val shouldAbandon = synchronized(monitor) {
+            if (currentGeneration != generation || lostGeneration == currentGeneration) {
+                false
+            } else {
+                lostGeneration = currentGeneration
+                socket = null
+                true
+            }
+        }
+        if (!shouldAbandon) return
+        stabilityJob?.cancel()
+        stabilityJob = null
+        onSocketLost()
+        if (synchronized(monitor) { reconnectJob == null && !manuallyDisconnected }) {
+            mutableState.value = ConnectionState.Disconnected
         }
     }
 
@@ -543,6 +605,8 @@ abstract class OkHttpCodexConnection internal constructor(
             }
         }
         if (!shouldHandle) return
+        stabilityJob?.cancel()
+        stabilityJob = null
         opened.completeExceptionally(cause)
         onSocketLost()
         if (!preservesPendingRequestsAcrossReconnect) {
@@ -576,7 +640,7 @@ abstract class OkHttpCodexConnection internal constructor(
             previousJob = reconnectJob
             reconnectJob = scope.launch {
                 delay(delayMillis)
-                lifecycleMutex.withLock {
+                val shouldReconnect = lifecycleMutex.withLock {
                     val shouldReconnect = synchronized(monitor) {
                         if (manuallyDisconnected) {
                             false
@@ -585,13 +649,18 @@ abstract class OkHttpCodexConnection internal constructor(
                             true
                         }
                     }
-                    if (!shouldReconnect) return@withLock
-                    mutableState.value = ConnectionState.Connecting(attempt = attempt)
-                    try {
-                        openOnce(awaitOpen = true)
-                    } catch (_: Throwable) {
-                        // The listener/preparation failure schedules the next bounded attempt.
+                    if (shouldReconnect) {
+                        mutableState.value = ConnectionState.Connecting(attempt = attempt)
                     }
+                    shouldReconnect
+                }
+                if (!shouldReconnect) return@launch
+                try {
+                    openOnce(awaitOpen = true)
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (_: Throwable) {
+                    // The listener/preparation failure schedules the next bounded attempt.
                 }
             }
         }
@@ -616,6 +685,7 @@ abstract class OkHttpCodexConnection internal constructor(
     }
 
     private companion object {
+        const val RECONNECT_STABILITY_MILLIS = 30_000L
         val RESERVED_HEADERS = setOf("connection", "upgrade", "host", "origin")
     }
 }

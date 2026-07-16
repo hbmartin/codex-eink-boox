@@ -2,6 +2,8 @@
     <string name="eink_random">Aleatorio</string>
     <string name="eink_decrease">Disminuir</string>
     <string name="eink_increase">Aumentar</string>
+    <string name="eink_expanded">Expandido</string>
+    <string name="eink_collapsed">Contraído</string>
     <string name="eink_color_red">Rojo</string>
     <string name="eink_color_pink">Rosa</string>
     <string name="eink_color_purple">Morado</string>

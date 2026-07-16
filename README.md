@@ -64,8 +64,9 @@ codex app-server \
   --ws-token-file "$HOME/.codex/codex-eink/app-server-token"
 ```
 
-Enter the private WebSocket URL and token under **Direct diagnostic**. Debug builds allow `ws://` only
-for loopback and Tailscale addresses; ordinary LAN addresses and release builds require `wss://`.
+Enter the private WebSocket URL and token under **Direct diagnostic**. The helper rejects public and
+ordinary LAN bind addresses; it accepts only loopback or Tailscale IPs. Debug builds apply the same
+restriction to `ws://`, while other networks and release builds require `wss://`.
 The [setup guide](docs/SETUP.md#choose-a-connection-path) covers the security and operational tradeoffs of
 each transport.
 

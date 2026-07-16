@@ -254,6 +254,43 @@ class ProtocolCodexControllerTest {
         assertEquals("Hello", streamed.single().body)
     }
 
+    @Test
+    fun `managed profile is persisted and reaches the compatibility gate without transport creation`() = runBlocking {
+        val fixture = fixture { method, _ -> error("Unexpected request: $method") }
+        val managed = ConnectionProfile(
+            displayName = "Managed Remote",
+            endpoint = "",
+            credential = "",
+            mode = TransportMode.ManagedRelay,
+        )
+
+        fixture.controller.saveAndConnect(managed)
+
+        assertEquals(managed, fixture.credentials.stored)
+        assertEquals(Connectivity.Incompatible, fixture.controller.state.value.connectivity)
+        assertTrue(fixture.connection.requests.isEmpty())
+    }
+
+    @Test
+    fun `message success sequence advances only after host acceptance`() = runBlocking {
+        val fixture = fixture { method, _ ->
+            when (method) {
+                "initialize" -> success(emptyObject())
+                "thread/list" -> success(threadList())
+                "thread/resume" -> success(resumedThread())
+                "turn/start" -> success(json("""{"turn":{"id":"turn-1"}}"""))
+                else -> error("Unexpected request: $method")
+            }
+        }
+        fixture.connectAndSelect()
+        val before = fixture.controller.state.value.sentMessageSequence
+
+        fixture.controller.send("hello")
+
+        assertEquals(before + 1, fixture.controller.state.value.sentMessageSequence)
+        assertFalse(fixture.controller.state.value.sendingMessage)
+    }
+
     private fun fixture(
         handler: suspend FakeConnection.(String, JsonElement?) -> JsonRpcResponse,
     ): Fixture {

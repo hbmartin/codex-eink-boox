@@ -59,4 +59,12 @@ class PairingCodeParserTest {
         assertNull(PairingCodeParser.parse("codex-eink://pair?code=bad%3Avalue"))
         assertNull(PairingCodeParser.parse("codex-eink://pair"))
     }
+
+    @Test
+    fun `pairing URI skips an invalid earlier query key`() {
+        assertEquals(
+            "VALID-1234",
+            PairingCodeParser.parse("codex-eink://pair?pairing_code=tiny&code=valid-1234"),
+        )
+    }
 }

@@ -43,6 +43,21 @@ class JsonRpcCodecTest {
         assertEquals(JsonRpcId.StringId("approval-1"), decoded.id)
         assertEquals("item/commandExecution/requestApproval", decoded.method)
         assertEquals(JsonPrimitive(42), decoded.raw?.get("future"))
+        assertTrue(codec.encode(decoded).contains("\"future\":42"))
+    }
+
+    @Test
+    fun `re-encoding preserves extensions but replaces stale canonical fields`() {
+        val decoded = codec.decode(
+            """{"jsonrpc":"2.0","id":7,"result":{"ok":true},"future":{"enabled":true}}""",
+        ) as JsonRpcResponse
+
+        val encoded = codec.encode(decoded.copy(error = JsonRpcError(-32000, "failed"), result = null))
+
+        assertTrue(encoded.contains("\"future\":{\"enabled\":true}"))
+        assertTrue(encoded.contains("\"error\""))
+        assertFalse(encoded.contains("\"result\""))
+        assertFalse(encoded.contains("\"jsonrpc\""))
     }
 
     @Test
@@ -104,6 +119,16 @@ class JsonRpcCodecTest {
             codec.decode(
                 """{"id":1,"result":{"ok":true},"error":{"code":-32603,"message":"broken"}}""",
             )
+        }
+    }
+
+    @Test
+    fun `rejects error codes outside the Int range`() {
+        assertThrows(JsonRpcCodecException::class.java) {
+            codec.decode("""{"id":1,"error":{"code":2147483648,"message":"too large"}}""")
+        }
+        assertThrows(JsonRpcCodecException::class.java) {
+            codec.decode("""{"id":1,"error":{"code":-2147483649,"message":"too small"}}""")
         }
     }
 

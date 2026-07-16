@@ -75,11 +75,10 @@ abstract class BaseCodexConnection : CodexConnection {
         val id = JsonRpcId.NumberId(nextRequestId.getAndIncrement())
         val pending = CompletableDeferred<JsonRpcResponse>()
         pendingRequests[id] = pending
-        if (!send(JsonRpcRequest(id = id, method = method, params = params))) {
-            pendingRequests.remove(id)
-            throw IOException("Transport rejected JSON-RPC request")
-        }
         return try {
+            if (!send(JsonRpcRequest(id = id, method = method, params = params))) {
+                throw IOException("Transport rejected JSON-RPC request")
+            }
             withTimeout(timeoutMillis) { pending.await() }
         } finally {
             pendingRequests.remove(id)

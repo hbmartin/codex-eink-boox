@@ -12,6 +12,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 import me.haroldmartin.codexeink.ApprovalUi
+import me.haroldmartin.codexeink.ApprovalDecisionUi
+import me.haroldmartin.codexeink.ApprovalScope
 import me.haroldmartin.codexeink.QuestionFieldUi
 import me.haroldmartin.codexeink.QuestionUi
 import me.haroldmartin.codexeink.ThreadUi
@@ -195,9 +197,19 @@ internal object ProtocolMapper {
             title = kind,
             reason = params.string("reason"),
             commandOrDiff = details.ifBlank { params.renderCompact() },
-            availableDecisions = decisions,
+            availableDecisions = decisions.distinct().map(::approvalDecision),
         )
     }
+
+    private fun approvalDecision(value: String): ApprovalDecisionUi = ApprovalDecisionUi(
+        value = value,
+        scope = when (value) {
+            "allowForSession", "acceptForSession" -> ApprovalScope.Session
+            "acceptWithExecpolicyAmendment", "applyNetworkPolicyAmendment" -> ApprovalScope.Persistent
+            "deny", "decline", "cancel", "allowForTurn", "accept" -> ApprovalScope.OneShot
+            else -> ApprovalScope.Persistent
+        },
+    )
 
     fun question(id: JsonRpcId, paramsElement: JsonElement?): QuestionUi? {
         val questions = paramsElement.objectOrNull()

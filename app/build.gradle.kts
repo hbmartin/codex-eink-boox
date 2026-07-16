@@ -90,7 +90,6 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.zxing.core)
     implementation(platform(libs.androidx.compose.bom))
 
     testImplementation(libs.junit)

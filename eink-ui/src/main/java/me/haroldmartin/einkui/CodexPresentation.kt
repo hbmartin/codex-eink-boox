@@ -16,6 +16,10 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -171,18 +175,38 @@ fun EinkConnectionBanner(
     }
 }
 
-/** Presentation shell for a server-owned approval request and caller-owned decisions. */
+enum class EinkApprovalScope {
+    OneShot,
+    Session,
+    Persistent,
+}
+
+@Immutable
+data class EinkApprovalDecision(
+    val id: String,
+    val label: String,
+    val scope: EinkApprovalScope,
+    val preferred: Boolean = false,
+)
+
+/** Approval panel that enforces secondary confirmation for every durable decision. */
 @Composable
 @Suppress("LongParameterList")
 fun EinkApprovalPanelShell(
     title: String,
+    decisions: List<EinkApprovalDecision>,
+    onDecision: (String) -> Unit,
+    confirmationTitle: String,
+    confirmationText: String,
+    confirmLabel: String,
+    cancelLabel: String,
     modifier: Modifier = Modifier,
     badgeLabel: String? = null,
     description: String? = null,
     cautionText: String? = null,
     details: @Composable ColumnScope.() -> Unit = {},
-    decisionActions: @Composable () -> Unit,
 ) {
+    var pendingDecision by remember(decisions) { mutableStateOf<EinkApprovalDecision?>(null) }
     EinkSurface(
         modifier = modifier.fillMaxWidth(),
         borderWidth = EinkTheme.borders.strong,
@@ -231,9 +255,42 @@ fun EinkApprovalPanelShell(
                 horizontalArrangement = Arrangement.spacedBy(EinkTheme.spacing.small, Alignment.End),
                 verticalArrangement = Arrangement.spacedBy(EinkTheme.spacing.small),
             ) {
-                decisionActions()
+                decisions.forEach { decision ->
+                    EinkButton(
+                        emphasis = if (decision.preferred) {
+                            EinkButtonEmphasis.Strong
+                        } else {
+                            EinkButtonEmphasis.Standard
+                        },
+                        onClick = {
+                            if (decision.scope == EinkApprovalScope.OneShot) {
+                                onDecision(decision.id)
+                            } else {
+                                pendingDecision = decision
+                            }
+                        },
+                    ) { Text(decision.label) }
+                }
             }
         }
+    }
+    pendingDecision?.let { decision ->
+        EinkConfirmDialog(
+            onDismissRequest = { pendingDecision = null },
+            title = { Text(confirmationTitle) },
+            text = { Text(confirmationText) },
+            confirmButton = {
+                EinkButton(
+                    onClick = {
+                        onDecision(decision.id)
+                        pendingDecision = null
+                    },
+                ) { Text(confirmLabel) }
+            },
+            dismissButton = {
+                EinkButton(onClick = { pendingDecision = null }) { Text(cancelLabel) }
+            },
+        )
     }
 }
 
@@ -258,6 +315,16 @@ internal fun EinkDiffLine.renderedText(lineNumberWidth: Int = DIFF_LINE_NUMBER_W
     return "$oldNumber $newNumber ${kind.marker}$text"
 }
 
+internal fun diffLineNumberWidth(lines: List<EinkDiffLine>): Int = maxOf(
+    DIFF_LINE_NUMBER_WIDTH,
+    lines.maxOfOrNull { line ->
+        maxOf(
+            line.oldLineNumber?.toString()?.length ?: 0,
+            line.newLineNumber?.toString()?.length ?: 0,
+        )
+    } ?: 0,
+)
+
 /** A selectable unified-diff block whose +, -, and @ markers carry meaning without color. */
 @Composable
 fun EinkDiffBlock(
@@ -267,6 +334,7 @@ fun EinkDiffBlock(
     status: String? = null,
 ) {
     val horizontalScroll = rememberScrollState()
+    val lineNumberWidth = remember(lines) { diffLineNumberWidth(lines) }
     EinkSurface(modifier = modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Row(
@@ -297,7 +365,7 @@ fun EinkDiffBlock(
                     Column {
                         lines.forEach { line ->
                             Text(
-                                text = line.renderedText(),
+                                text = line.renderedText(lineNumberWidth),
                                 color = EinkTheme.colors.content,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = if (line.kind == EinkDiffLineKind.Header) {

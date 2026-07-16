@@ -2,6 +2,8 @@
     <string name="eink_random">Zufällig</string>
     <string name="eink_decrease">Verringern</string>
     <string name="eink_increase">Erhöhen</string>
+    <string name="eink_expanded">Erweitert</string>
+    <string name="eink_collapsed">Zusammengeklappt</string>
     <string name="eink_color_red">Rot</string>
     <string name="eink_color_pink">Rosa</string>
     <string name="eink_color_purple">Violett</string>

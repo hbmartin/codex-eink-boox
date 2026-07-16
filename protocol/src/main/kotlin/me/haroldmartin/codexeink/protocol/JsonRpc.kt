@@ -125,16 +125,26 @@ class JsonRpcCodec(
     fun encode(message: JsonRpcMessage): String = json.encodeToString(
         JsonObject.serializer(),
         when (message) {
-            is JsonRpcRequest -> buildBase {
+            is JsonRpcRequest -> buildBase(
+                raw = message.raw,
+                excludedKeys = setOf("result", "error") + if (message.params == null) setOf("params") else emptySet(),
+            ) {
                 put("id", encodeId(message.id))
                 put("method", message.method)
                 message.params?.let { put("params", it) }
             }
-            is JsonRpcNotification -> buildBase {
+            is JsonRpcNotification -> buildBase(
+                raw = message.raw,
+                excludedKeys = setOf("id", "result", "error") +
+                    if (message.params == null) setOf("params") else emptySet(),
+            ) {
                 put("method", message.method)
                 message.params?.let { put("params", it) }
             }
-            is JsonRpcResponse -> buildBase {
+            is JsonRpcResponse -> buildBase(
+                raw = message.raw,
+                excludedKeys = setOf("method", "params", if (message.error != null) "result" else "error"),
+            ) {
                 put("id", encodeId(message.id))
                 if (message.error != null) {
                     put("error", encodeError(message.error))
@@ -145,8 +155,15 @@ class JsonRpcCodec(
         },
     )
 
-    private fun buildBase(block: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit): JsonObject =
+    private fun buildBase(
+        raw: JsonObject?,
+        excludedKeys: Set<String>,
+        block: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit,
+    ): JsonObject =
         buildJsonObject {
+            raw?.forEach { (key, value) ->
+                if (key != "jsonrpc" && key !in excludedKeys) put(key, value)
+            }
             if (includeVersion) put("jsonrpc", "2.0")
             block()
         }
@@ -168,7 +185,9 @@ class JsonRpcCodec(
 
     private fun decodeError(element: JsonElement): JsonRpcError {
         val error = element as? JsonObject ?: throw JsonRpcCodecException("JSON-RPC error must be an object")
-        val code = error["code"]?.jsonPrimitive?.longOrNull?.toInt()
+        val code = error["code"]?.jsonPrimitive?.longOrNull
+            ?.takeIf { it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() }
+            ?.toInt()
             ?: throw JsonRpcCodecException("JSON-RPC error code must be an integer")
         val message = error["message"]?.jsonPrimitive?.contentOrNull
             ?: throw JsonRpcCodecException("JSON-RPC error message must be a string")

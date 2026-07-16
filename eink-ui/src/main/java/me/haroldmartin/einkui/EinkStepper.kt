@@ -41,7 +41,13 @@ fun EinkStepper(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             EinkIconButton(
-                onClick = { onValueChange((value - step).coerceAtLeast(valueRange.first)) },
+                onClick = {
+                    onValueChange(
+                        (value.toLong() - step.toLong())
+                            .coerceIn(valueRange.first.toLong(), valueRange.last.toLong())
+                            .toInt(),
+                    )
+                },
                 enabled = value > valueRange.first,
                 modifier = Modifier.semantics { contentDescription = decrementDescription },
             ) {
@@ -53,7 +59,13 @@ fun EinkStepper(
                 style = EinkTheme.typography.body,
             )
             EinkIconButton(
-                onClick = { onValueChange((value + step).coerceAtMost(valueRange.last)) },
+                onClick = {
+                    onValueChange(
+                        (value.toLong() + step.toLong())
+                            .coerceIn(valueRange.first.toLong(), valueRange.last.toLong())
+                            .toInt(),
+                    )
+                },
                 enabled = value < valueRange.last,
                 modifier = Modifier.semantics { contentDescription = incrementDescription },
             ) {

@@ -39,6 +39,19 @@ class ProtocolRedactorTest {
     }
 
     @Test
+    fun `redacts credentials and identifiers embedded in URL query strings`() {
+        val input = "wss://host.invalid/connect?access_token=secret%2Btoken&client_id=device-123&safe=visible"
+
+        val output = ProtocolRedactor.redact(input)
+
+        assertFalse(output.contains("secret%2Btoken"))
+        assertFalse(output.contains("device-123"))
+        assertTrue(output.contains("access_token=<redacted>"))
+        assertTrue(output.contains("client_id=<redacted>"))
+        assertTrue(output.contains("safe=visible"))
+    }
+
+    @Test
     fun `summary never includes params result or string ids`() {
         val request = JsonRpcRequest(
             id = JsonRpcId.StringId("secret-id"),
